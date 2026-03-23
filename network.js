@@ -107,9 +107,9 @@ const Network = (() => {
 
     return new Promise((resolve, reject) => {
       const conn = peer.connect(hostPeerId, { reliable: true });
+      // Register all listeners immediately before open fires
+      setupConnection(conn);
       conn.on('open', () => {
-        connections.set(hostPeerId, conn);
-        setupConnection(conn);
         if (onConnectedCallback) onConnectedCallback(hostPeerId);
         resolve(conn);
       });

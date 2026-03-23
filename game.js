@@ -137,6 +137,16 @@ const Game = (() => {
       case 'SEAT_ASSIGNED':
         mySeat = msg.seat;
         state = msg.state;
+        // Restore passedPlayers as a Set (serialized as array)
+        if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
+          state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
+        }
+        // Populate seatToPeer so client can send messages to host
+        if (msg.seatToPeer) {
+          for (const [seat, peerId] of Object.entries(msg.seatToPeer)) {
+            seatToPeer.set(Number(seat), peerId);
+          }
+        }
         UI.updateLobby(state, mySeat);
         UI.showToast(`Seated at position ${msg.seat + 1} (Team ${Engine.getTeam(msg.seat)})`);
         break;
@@ -146,6 +156,10 @@ const Game = (() => {
         state = msg.state;
         if (myHand && myHand.length > 0 && (!state.hands[mySeat] || state.hands[mySeat].length === 0)) {
           state.hands[mySeat] = myHand;
+        }
+        // Restore passedPlayers as a Set
+        if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
+          state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
         }
         UI.updateAll(state, mySeat);
         break;
@@ -157,6 +171,10 @@ const Game = (() => {
         break;
       case 'DEAL_ALL':
         state = msg.state;
+        // Restore passedPlayers as a Set
+        if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
+          state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
+        }
         // Extract my hand from the full hands array
         if (msg.hands && msg.hands[mySeat]) {
           state.hands[mySeat] = msg.hands[mySeat];
@@ -217,11 +235,14 @@ const Game = (() => {
     peerToSeat.set(fromPeer, seat);
     seatToPeer.set(seat, fromPeer);
 
-    // Send seat assignment
+    // Send seat assignment — include seatToPeer so client knows how to reach host
+    const seatToPeerObj = {};
+    for (const [s, p] of seatToPeer) seatToPeerObj[s] = p;
     Network.sendTo(fromPeer, {
       type: 'SEAT_ASSIGNED',
       seat,
       state: sanitizeStateForClient(state),
+      seatToPeer: seatToPeerObj,
     });
 
     // Send peer list for mesh networking
@@ -591,6 +612,13 @@ const Game = (() => {
     }
   }
 
+  function handleNoRaise(fromPeer) {
+    const seat = peerToSeat.get(fromPeer);
+    if (seat === undefined) return;
+    if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
+    processNoRaise();
+  }
+
   function processRaise(newBid) {
     if (newBid > state.currentRound.bid && newBid <= 9) {
       state.currentRound.bid = newBid;
@@ -598,15 +626,6 @@ const Game = (() => {
       UI.showToast(`Bid raised to ${newBid}!`);
     }
     resumeAfterRaise();
-  }
-
-  function processNoRaise() {
-    state.currentRound.raised = true;
-    resumeAfterRaise();
-  }
-
-  function handleNoRaise() {
-    processNoRaise();
   }
 
   function resumeAfterRaise() {
@@ -894,9 +913,9 @@ const Game = (() => {
   function sanitizeStateForClient(s) {
     const clean = JSON.parse(JSON.stringify(s));
     clean.hands = [[], [], [], [], [], []]; // Hands sent separately
-    // Convert Set to array for serialization
+    // Convert Set to array for JSON serialization (restored as Set on client)
     if (clean.currentRound && clean.currentRound.passedPlayers) {
-      clean.currentRound.passedPlayers = [];
+      clean.currentRound.passedPlayers = Array.from(s.currentRound.passedPlayers || []);
     }
     return clean;
   }
