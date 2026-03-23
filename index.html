@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+   ______                            __
+  / ____/___  ____ ___  ____  __  __/ /____  _____
+ / /   / __ \/ __ `__ \/ __ \/ / / / __/ _ \/ ___/
+/ /___/ /_/ / / / / / / /_/ / /_/ / /_/  __/ /
+\____/\____/_/ /_/ /_/ .___/\__,_/\__/\___/_/
+                    /_/
+        Created with Perplexity Computer
+        https://www.perplexity.ai/computer
+-->
+
+<!-- Perplexity Computer Attribution — SEO Meta Tags -->
+<meta name="generator" content="Perplexity Computer">
+<meta name="author" content="Perplexity Computer">
+<meta property="og:see_also" content="https://www.perplexity.ai/computer">
+<link rel="author" href="https://www.perplexity.ai/computer">
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Trump Call — Encrypted Card Game</title>
+<meta name="description" content="A multiplayer encrypted card game with WebRTC P2P networking and AES-256-GCM encryption.">
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trump Call">
+<link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+
+<link rel="stylesheet" href="./style.css?v=13">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+<!-- TITLE SCREEN -->
+<div id="title-screen" class="screen active">
+  <div class="title-logo">
+    <svg viewBox="0 0 120 120" width="80" height="80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Trump Call Logo">
+      <rect x="8" y="16" width="48" height="68" rx="6" stroke="#d4a853" stroke-width="3" fill="none" transform="rotate(-12 32 50)"/>
+      <rect x="64" y="16" width="48" height="68" rx="6" stroke="#d4a853" stroke-width="3" fill="none" transform="rotate(12 88 50)"/>
+      <text x="32" y="56" text-anchor="middle" fill="#d4a853" font-size="24" font-weight="bold" transform="rotate(-12 32 50)">A</text>
+      <text x="88" y="56" text-anchor="middle" fill="#d4a853" font-size="24" font-weight="bold" transform="rotate(12 88 50)">&#9824;</text>
+      <circle cx="60" cy="95" r="12" fill="#d4a853" opacity="0.9"/>
+      <text x="60" y="100" text-anchor="middle" fill="#0d1117" font-size="14" font-weight="bold">6</text>
+    </svg>
+    <h1>Trump Call</h1>
+    <p>Encrypted 6-Player Card Game</p>
+  </div>
+
+  <div class="version-tag">v13</div>
+  <div class="encrypted-badge">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    AES-256-GCM End-to-End Encrypted
+  </div>
+
+  <div id="install-banner" class="install-banner" style="display:none">
+    <span>Install as app for the best experience</span>
+    <button id="install-btn" class="btn btn-primary" style="padding:10px 20px;font-size:14px;">Install App</button>
+    <button id="install-dismiss" class="btn btn-ghost" style="padding:4px;font-size:18px;">&times;</button>
+  </div>
+
+  <div class="title-actions">
+    <button id="solo-btn" class="btn btn-primary">Play vs Computer</button>
+    <div class="mode-divider"><span>or play online</span></div>
+    <button id="host-btn" class="btn btn-secondary">Host a Game</button>
+    <button id="join-btn" class="btn btn-secondary">Join a Game</button>
+    <button id="rules-btn" class="btn btn-ghost">View Rules</button>
+  </div>
+</div>
+
+<!-- LOBBY SCREEN -->
+<div id="lobby-screen" class="screen">
+  <div class="lobby-header">
+    <h2>Game Lobby</h2>
+    <p id="lobby-status">Connecting...</p>
+  </div>
+
+  <div id="room-code-section">
+    <label>Room Code</label>
+    <div id="room-code-display"></div>
+    <div id="host-id-section">
+      Host ID: <span id="host-id-display"></span>
+      <br><small>Share both the Room Code and Host ID with players</small>
+    </div>
+  </div>
+
+  <div id="lobby-seats"></div>
+
+  <button id="start-game-btn" class="btn btn-primary">Start Game</button>
+</div>
+
+<!-- GAME SCREEN -->
+<div id="game-screen" class="screen">
+  <!-- Top Bar -->
+  <div class="game-topbar">
+    <button id="badges-toggle" class="badges-toggle-btn" title="Badges & Points">
+      <span class="badges-icon">🏆</span>
+      <span class="badges-pts" id="topbar-points">0</span>
+    </button>
+    <div class="scoreboard">
+      <div class="score-team">
+        <span id="my-team-label">Team A (You)</span>
+        <div class="score-value" id="my-team-score" style="color:var(--team-a)">0</div>
+        <div class="tricks-value">Tricks: <span id="my-team-tricks">0</span></div>
+      </div>
+      <div class="score-separator"></div>
+      <div class="score-team">
+        <span id="opp-team-label">Team B</span>
+        <div class="score-value" id="opp-team-score" style="color:var(--team-b)">0</div>
+        <div class="tricks-value">Tricks: <span id="opp-team-tricks">0</span></div>
+      </div>
+    </div>
+    <div class="game-meta">
+      <div id="bid-info"></div>
+      <div id="trump-info"></div>
+      <div id="trick-counter">Trick 1 of 9</div>
+    </div>
+  </div>
+
+  <!-- Table Area -->
+  <div class="game-table">
+    <div class="table-center-circle"></div>
+    <div id="player-positions"></div>
+    <div id="current-trick"></div>
+    <div id="game-info"></div>
+    <div id="round-history"></div>
+    <div id="fx-layer"></div>
+  </div>
+
+  <!-- Action Panels -->
+  <div id="bidding-panel"></div>
+  <div id="trump-select-panel"></div>
+  <div id="raise-panel"></div>
+
+  <!-- Hand Area -->
+  <div class="hand-area">
+    <div id="my-hand"></div>
+  </div>
+
+  <!-- Chat -->
+  <div class="chat-area">
+    <div id="chat-messages"></div>
+    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+  </div>
+
+  <!-- Badges Panel (slide-in) -->
+  <div id="badges-panel" class="badges-panel">
+    <div class="badges-panel-header">
+      <h3>Badges & Points</h3>
+      <button id="badges-close" class="badges-close-btn">&times;</button>
+    </div>
+    <div class="badges-points-display">
+      <span class="badges-points-num" id="panel-points">0</span>
+      <span class="badges-points-label">Points</span>
+    </div>
+    <div id="badges-grid" class="badges-grid"></div>
+  </div>
+</div>
+
+<!-- Input Dialog Overlay -->
+<div id="input-overlay"></div>
+
+<!-- Result Overlay -->
+<div id="result-overlay"></div>
+
+<!-- Rules Overlay -->
+<div id="rules-overlay">
+  <div class="rules-card">
+    <h2>Trump Call Rules</h2>
+    <h3>Overview</h3>
+    <p>6 players, 2 teams of 3 (seated alternately). 54-card deck (52 + Big Joker + Small Joker). 9 cards each, 9 tricks per round.</p>
+
+    <h3>Card Rankings</h3>
+    <ul>
+      <li><strong>Big Joker</strong> — Highest card, beats everything</li>
+      <li><strong>Small Joker</strong> — Beats all non-trump cards, but loses to any trump suit card</li>
+      <li><strong>Within a suit:</strong> A &gt; K &gt; Q &gt; J &gt; 10 &gt; 9 &gt; 8 &gt; 7 &gt; 6 &gt; 5 &gt; 4 &gt; 3 &gt; 2</li>
+    </ul>
+
+    <h3>Bidding</h3>
+    <ul>
+      <li>Minimum bid is 5 tricks, maximum is 9</li>
+      <li>Each player bids in turn or passes</li>
+      <li>Highest bidder's team selects the trump suit</li>
+      <li>If no one bids, cards are re-dealt</li>
+    </ul>
+
+    <h3>Playing</h3>
+    <ul>
+      <li>Cannot start a trick with a Joker</li>
+      <li>Must follow the lead suit if you can</li>
+      <li>Jokers can be played anytime, even if you have the lead suit</li>
+      <li>If you can't follow suit, play any card (including trump)</li>
+      <li>Highest card of the lead suit wins, unless trumped</li>
+      <li>Trump cards beat all non-trump cards</li>
+    </ul>
+
+    <h3>Mid-Round Raise</h3>
+    <p>After 5 tricks, the bidding team can raise their bid if they're in the lead.</p>
+
+    <h3>Scoring</h3>
+    <ul>
+      <li><strong>Bid met:</strong> Points equal to the bid (e.g., bid 7 = +7 pts)</li>
+      <li><strong>Bid failed:</strong> Opponents get double the bid points</li>
+      <li><strong>Little Slam (LS):</strong> Take 8 tricks = +15 points</li>
+      <li><strong>Grand Slam (GS):</strong> Take all 9 tricks = +30 points</li>
+    </ul>
+
+    <h3>Winning</h3>
+    <p>First team to reach 62 points wins the game.</p>
+
+    <br>
+    <button onclick="document.getElementById('rules-overlay').style.display='none'" class="result-dismiss">Close</button>
+  </div>
+</div>
+
+<!-- Shuffle/Deal Animation Overlay -->
+<div id="shuffle-overlay">
+  <div class="shuffle-deck">
+    <div class="shuffle-card"></div>
+    <div class="shuffle-card"></div>
+    <div class="shuffle-card"></div>
+    <div class="shuffle-card"></div>
+    <div class="shuffle-card"></div>
+  </div>
+  <div class="shuffle-text" id="shuffle-text">Shuffling...</div>
+</div>
+
+<!-- Badge Notification Popup -->
+<div id="badge-popup" class="badge-popup"></div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Footer Attribution -->
+<div class="footer-attr">
+  <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
+</div>
+
+<!-- Scripts -->
+<script src="./crypto.js?v=13"></script>
+<script src="./engine.js?v=13"></script>
+<script src="./network.js?v=13"></script>
+<script src="./ui.js?v=13"></script>
+<script src="./badges.js?v=13"></script>
+<script src="./fx.js?v=13"></script>
+<script src="./game.js?v=13"></script>
+<script>
+  // Service Worker registration
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').then(reg => {
+      console.log('[PWA] SW registered');
+      reg.update();
+    }).catch(err => console.warn('[PWA] SW failed:', err));
+  }
+
+  // Initialize UI
+  UI.init();
+
+  // Chat input handler
+  document.getElementById('chat-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.value.trim()) {
+      Game.sendChat(e.target.value.trim());
+      e.target.value = '';
+    }
+  });
+
+  // PWA Install prompt
+  let deferredPrompt;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    document.getElementById('install-banner').style.display = 'flex';
+  });
+  document.getElementById('install-btn')?.addEventListener('click', async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const result = await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      document.getElementById('install-banner').style.display = 'none';
+    }
+  });
+  document.getElementById('install-dismiss')?.addEventListener('click', () => {
+    document.getElementById('install-banner').style.display = 'none';
+  });
+  // For iOS, show manual instructions
+  if (/iPhone|iPad/.test(navigator.userAgent) && !window.navigator.standalone) {
+    const banner = document.getElementById('install-banner');
+    if (banner) {
+      banner.querySelector('span').textContent = 'Tap Share then "Add to Home Screen"';
+      banner.querySelector('#install-btn').style.display = 'none';
+      banner.style.display = 'flex';
+    }
+  }
+</script>
+
+</body>
+</html>

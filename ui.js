@@ -1,0 +1,761 @@
+// ============================================================
+// UI MODULE — Rendering & Interactions
+// ============================================================
+
+const UI = (() => {
+  // Card rendering
+  const SUIT_SYMBOLS = {
+    spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', joker: '\u2605'
+  };
+  const SUIT_COLORS = {
+    spades: '#1a1a2e', hearts: '#c0392b', diamonds: '#c0392b', clubs: '#1a1a2e', joker: '#8e44ad'
+  };
+
+  let toastTimeout = null;
+
+  let badgePopupTimeout = null;
+
+  function init() {
+    document.getElementById('solo-btn').addEventListener('click', startSoloGame);
+    document.getElementById('host-btn').addEventListener('click', showHostDialog);
+    document.getElementById('join-btn').addEventListener('click', showJoinDialog);
+    document.getElementById('rules-btn').addEventListener('click', showRules);
+
+    // Badges panel toggle
+    document.getElementById('badges-toggle').addEventListener('click', toggleBadgesPanel);
+    document.getElementById('badges-close').addEventListener('click', () => {
+      document.getElementById('badges-panel').classList.remove('open');
+    });
+
+    // Register badge earned callback
+    Badges.onBadgeEarned((badge) => {
+      showBadgePopup(badge);
+      updatePointsDisplay();
+    });
+  }
+
+  function startSoloGame() {
+    showInputDialog('Enter your name', 'Player', (name) => {
+      showScreen('game-screen');
+      Badges.reset();
+      updatePointsDisplay();
+      renderBadgesGrid();
+      Game.startSoloGame(name);
+    });
+  }
+
+  // === TITLE SCREEN ===
+  function showHostDialog() {
+    showInputDialog('Enter your name', 'Host', (name) => {
+      showScreen('lobby-screen');
+      document.getElementById('lobby-status').textContent = 'Creating room...';
+      Game.hostGame(name).then(roomCode => {
+        document.getElementById('room-code-display').textContent = roomCode;
+        document.getElementById('host-id-display').textContent = Network.getPeerId() || '';
+        document.getElementById('room-code-section').style.display = 'flex';
+        document.getElementById('lobby-status').textContent = 'Waiting for players...';
+        document.getElementById('start-game-btn').style.display = 'block';
+        document.getElementById('start-game-btn').addEventListener('click', () => Game.startGame());
+      }).catch(err => {
+        showToast('Failed to create room: ' + err.message);
+        showScreen('title-screen');
+      });
+    });
+  }
+
+  function showJoinDialog() {
+    showMultiInputDialog([
+      { label: 'Your Name', placeholder: 'Player', key: 'name' },
+      { label: 'Room Code', placeholder: 'ABC123', key: 'code' },
+      { label: 'Host ID', placeholder: 'TC_...', key: 'hostId' },
+    ], (vals) => {
+      if (!vals.name || !vals.code || !vals.hostId) { showToast('All fields required'); return; }
+      showScreen('lobby-screen');
+      document.getElementById('lobby-status').textContent = 'Joining room...';
+      Game.joinGame(vals.name.trim(), vals.hostId.trim(), vals.code.trim().toUpperCase()).catch(err => {
+        showToast('Failed to join: ' + err.message);
+        showScreen('title-screen');
+      });
+    });
+  }
+
+  // === INPUT DIALOGS (PWA-friendly, no prompt()) ===
+  function showInputDialog(label, placeholder, callback) {
+    const overlay = document.getElementById('input-overlay');
+    overlay.style.display = 'flex';
+    overlay.innerHTML = `
+      <div class="input-dialog">
+        <label>${label}</label>
+        <input type="text" id="dialog-input" placeholder="${placeholder}" autocomplete="off" maxlength="20">
+        <div class="dialog-btns">
+          <button class="bid-btn pass-btn" id="dialog-cancel">Cancel</button>
+          <button class="bid-btn" id="dialog-ok" style="background:var(--accent-gold);color:#000">OK</button>
+        </div>
+      </div>
+    `;
+    const input = document.getElementById('dialog-input');
+    input.focus();
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('dialog-ok').click(); });
+    document.getElementById('dialog-cancel').addEventListener('click', () => { overlay.style.display = 'none'; });
+    document.getElementById('dialog-ok').addEventListener('click', () => {
+      const val = input.value.trim() || placeholder;
+      overlay.style.display = 'none';
+      callback(val);
+    });
+  }
+
+  function showMultiInputDialog(fields, callback) {
+    const overlay = document.getElementById('input-overlay');
+    overlay.style.display = 'flex';
+    const fieldsHtml = fields.map(f => `
+      <div class="dialog-field">
+        <label>${f.label}</label>
+        <input type="text" data-key="${f.key}" placeholder="${f.placeholder}" autocomplete="off" maxlength="30">
+      </div>
+    `).join('');
+    overlay.innerHTML = `
+      <div class="input-dialog">
+        ${fieldsHtml}
+        <div class="dialog-btns">
+          <button class="bid-btn pass-btn" id="dialog-cancel">Cancel</button>
+          <button class="bid-btn" id="dialog-ok" style="background:var(--accent-gold);color:#000">Join</button>
+        </div>
+      </div>
+    `;
+    overlay.querySelector('input').focus();
+    document.getElementById('dialog-cancel').addEventListener('click', () => { overlay.style.display = 'none'; });
+    document.getElementById('dialog-ok').addEventListener('click', () => {
+      const vals = {};
+      overlay.querySelectorAll('input').forEach(inp => {
+        vals[inp.dataset.key] = inp.value.trim() || inp.placeholder;
+      });
+      overlay.style.display = 'none';
+      callback(vals);
+    });
+  }
+
+  function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+  }
+
+  // === BADGES UI ===
+  function toggleBadgesPanel() {
+    const panel = document.getElementById('badges-panel');
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')) {
+      renderBadgesGrid();
+    }
+  }
+
+  function renderBadgesGrid() {
+    const grid = document.getElementById('badges-grid');
+    const all = Badges.getAllBadges();
+    const earned = Badges.getEarnedBadges();
+    const earnedIds = new Set(earned.map(b => b.id));
+
+    grid.innerHTML = all.map(b => {
+      const isEarned = earnedIds.has(b.id);
+      return `
+        <div class="badge-item ${isEarned ? 'earned' : 'locked'}">
+          <div class="badge-icon">${b.icon}</div>
+          <div class="badge-name">${b.name}</div>
+          <div class="badge-desc">${b.desc}</div>
+          ${b.pts > 0 ? `<div class="badge-pts-label">${isEarned ? '+' : ''}${b.pts} pts</div>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function updatePointsDisplay() {
+    const pts = Badges.getPoints();
+    const topbarEl = document.getElementById('topbar-points');
+    const panelEl = document.getElementById('panel-points');
+    if (topbarEl) topbarEl.textContent = pts;
+    if (panelEl) panelEl.textContent = pts;
+  }
+
+  function showBadgePopup(badge) {
+    const popup = document.getElementById('badge-popup');
+    popup.innerHTML = `
+      <div class="popup-icon">${badge.icon}</div>
+      <div class="popup-text">
+        <div class="popup-title">Badge Earned</div>
+        <div class="popup-name">${badge.name}</div>
+        ${badge.pts > 0 ? `<div class="popup-pts">+${badge.pts} pts</div>` : ''}
+      </div>
+    `;
+    popup.classList.add('show');
+    if (badgePopupTimeout) clearTimeout(badgePopupTimeout);
+    badgePopupTimeout = setTimeout(() => popup.classList.remove('show'), 3500);
+  }
+
+  // === SHUFFLE / DEAL ANIMATION ===
+  function showShuffleAnimation() {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById('shuffle-overlay');
+      const text = document.getElementById('shuffle-text');
+      overlay.classList.add('active');
+      text.textContent = 'Shuffling...';
+
+      // Phase 1: Shuffle for 1.2s
+      setTimeout(() => {
+        text.textContent = 'Dealing cards...';
+        // Phase 2: Deal animation
+        const deck = overlay.querySelector('.shuffle-deck');
+        // Stop shuffle animations
+        const cards = deck.querySelectorAll('.shuffle-card');
+        cards.forEach(c => {
+          c.style.animation = 'none';
+        });
+
+        // Create deal cards flying out
+        for (let i = 0; i < 6; i++) {
+          setTimeout(() => {
+            const dealCard = document.createElement('div');
+            dealCard.className = 'deal-card';
+            dealCard.style.animation = `dealToPlayer${i} 0.4s ease-in forwards`;
+            deck.appendChild(dealCard);
+            // Remove after animation
+            setTimeout(() => dealCard.remove(), 450);
+          }, i * 120);
+        }
+
+        // Trigger 3D FX deal animation on the game table
+        if (typeof FX !== 'undefined') {
+          const positions = getPlayerPositions();
+          FX.dealCards(positions);
+        }
+
+        // End after dealing animation
+        setTimeout(() => {
+          overlay.classList.remove('active');
+          // Reset shuffle card animations
+          cards.forEach(c => {
+            c.style.animation = '';
+          });
+          resolve();
+        }, 1200);
+      }, 1200);
+    });
+  }
+
+  // === LOBBY ===
+  function updateLobby(state, mySeat) {
+    const seatsDiv = document.getElementById('lobby-seats');
+    seatsDiv.innerHTML = '';
+
+    for (let i = 0; i < 6; i++) {
+      const player = state.players[i];
+      const team = Engine.getTeam(i);
+      const seatEl = document.createElement('div');
+      seatEl.className = `lobby-seat ${player ? 'occupied' : 'empty'} team-${team.toLowerCase()}`;
+      if (i === mySeat) seatEl.classList.add('me');
+
+      seatEl.innerHTML = `
+        <div class="seat-number">Seat ${i + 1}</div>
+        <div class="seat-team">Team ${team}</div>
+        <div class="seat-name">${player ? player.name : 'Empty'}</div>
+        ${player && player.connected === false ? '<div class="seat-dc">Disconnected</div>' : ''}
+      `;
+      seatsDiv.appendChild(seatEl);
+    }
+
+    // Show host ID for sharing
+    const hostInfo = document.getElementById('host-id-display');
+    if (hostInfo) {
+      hostInfo.textContent = Network.getPeerId() || '';
+    }
+  }
+
+  // === GAME TABLE ===
+  function updateAll(state, mySeat) {
+    if (!state) return;
+    if (state.phase === 'WAITING') return;
+    if (state.phase !== 'GAME_OVER') {
+      showScreen('game-screen');
+    }
+
+    renderScoreboard(state, mySeat);
+    renderPlayers(state, mySeat);
+    renderHand(state, mySeat);
+    renderTrick(state);
+    renderGameInfo(state, mySeat);
+    renderRoundHistory(state, mySeat);
+    renderBiddingUI(state, mySeat);
+    renderTrumpSelectUI(state, mySeat);
+    renderRaiseUI(state, mySeat);
+  }
+
+  function renderScoreboard(state, mySeat) {
+    const myTeam = Engine.getTeam(mySeat);
+    const oppTeam = myTeam === 'A' ? 'B' : 'A';
+    document.getElementById('my-team-score').textContent = state.scores[myTeam];
+    document.getElementById('opp-team-score').textContent = state.scores[oppTeam];
+    document.getElementById('my-team-label').textContent = `Team ${myTeam} (You)`;
+    document.getElementById('opp-team-label').textContent = `Team ${oppTeam}`;
+
+    // Tricks taken
+    const round = state.currentRound;
+    document.getElementById('my-team-tricks').textContent = round.tricksTaken[myTeam] || 0;
+    document.getElementById('opp-team-tricks').textContent = round.tricksTaken[oppTeam] || 0;
+
+    // Current bid info
+    const bidInfo = document.getElementById('bid-info');
+    if (round.bid > 0) {
+      const bidder = state.players[round.bidder];
+      bidInfo.textContent = `Bid: ${round.bid} by ${bidder ? bidder.name : '?'} (Team ${round.biddingTeam})`;
+    } else {
+      bidInfo.textContent = '';
+    }
+
+    // Trump info
+    const trumpInfo = document.getElementById('trump-info');
+    if (round.trumpSuit) {
+      const TRUMP_BANNER_COLORS = { spades: '#e0e0e0', hearts: '#ff6b6b', diamonds: '#ff8c42', clubs: '#a8d8a8', joker: '#c084fc' };
+      trumpInfo.innerHTML = `Trump: <span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${SUIT_SYMBOLS[round.trumpSuit]} ${round.trumpSuit.toUpperCase()}</span>`;
+    } else {
+      trumpInfo.textContent = '';
+    }
+  }
+
+  function renderPlayers(state, mySeat) {
+    const tableEl = document.getElementById('player-positions');
+    tableEl.innerHTML = '';
+
+    // Arrange 6 players around a hexagonal table, with mySeat at bottom
+    const positions = getPlayerPositions();
+
+    for (let i = 0; i < 6; i++) {
+      const seat = (mySeat + i) % 6;
+      const player = state.players[seat];
+      if (!player) continue;
+
+      const pos = positions[i];
+      const team = Engine.getTeam(seat);
+      const isCurrentPlayer = state.currentRound.currentPlayer === seat;
+      const isBidder = state.currentRound.bidder === seat;
+
+      const el = document.createElement('div');
+      el.className = `table-player ${isCurrentPlayer ? 'active' : ''} team-${team.toLowerCase()}`;
+      el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
+
+      // Build card backs HTML for other players
+      let cardBacksHtml = '';
+      if (seat !== mySeat) {
+        const cardCount = state.hands[seat] ? state.hands[seat].length : 0;
+        if (cardCount > 0) {
+          // Show up to 9 mini card backs fanned out
+          const showCount = Math.min(cardCount, 9);
+          let backs = '';
+          for (let c = 0; c < showCount; c++) {
+            backs += '<div class="card-back"></div>';
+          }
+          cardBacksHtml = `<div class="player-card-backs">${backs}</div>`;
+          cardBacksHtml += `<div class="player-cards-count">${cardCount} cards</div>`;
+        }
+      }
+
+      el.innerHTML = `
+        <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
+        <div class="player-name">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
+        <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}</div>
+        ${cardBacksHtml}
+      `;
+      tableEl.appendChild(el);
+    }
+  }
+
+  function getPlayerPositions() {
+    // 6 positions around table, index 0 = bottom center (me)
+    return [
+      { x: 50, y: 78 },   // Bottom (me)
+      { x: 12, y: 58 },   // Bottom-left
+      { x: 12, y: 25 },   // Top-left
+      { x: 50, y: 8 },    // Top
+      { x: 88, y: 25 },   // Top-right
+      { x: 88, y: 58 },   // Bottom-right
+    ];
+  }
+
+  function renderHand(state, mySeat) {
+    const handEl = document.getElementById('my-hand');
+    handEl.innerHTML = '';
+
+    const hand = state.hands[mySeat];
+    if (!hand || hand.length === 0) return;
+
+    const sorted = Engine.sortHand(hand, state.currentRound.trumpSuit);
+    const isLeading = !state.currentRound.currentTrick || state.currentRound.currentTrick.length === 0;
+    const leadSuit = !isLeading
+      ? (state.currentRound.currentTrick[0].card.suit === 'joker' ? null : state.currentRound.currentTrick[0].card.suit)
+      : null;
+    const playable = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat
+      ? Engine.getPlayableCards(hand, leadSuit, isLeading)
+      : [];
+
+    sorted.forEach((card) => {
+      const isPlayable = playable.find(c => c.id === card.id);
+      const isMyTurn = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat;
+
+      const cardEl = document.createElement('div');
+      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${card.suit === state.currentRound.trumpSuit ? 'trump-card' : ''}`;
+      cardEl.dataset.cardId = card.id;
+
+      const color = SUIT_COLORS[card.suit] || '#333';
+      const symbol = SUIT_SYMBOLS[card.suit] || '';
+      let displayRank = card.rank;
+      if (card.id === 'BIG_JOKER') displayRank = 'BIG';
+      if (card.id === 'SMALL_JOKER') displayRank = 'SM';
+
+      cardEl.innerHTML = `
+        <div class="card-inner" style="color:${color}">
+          <div class="card-corner top">
+            <div class="card-rank">${displayRank}</div>
+            <div class="card-suit">${symbol}</div>
+          </div>
+          <div class="card-center">${symbol}</div>
+          <div class="card-corner bottom">
+            <div class="card-rank">${displayRank}</div>
+            <div class="card-suit">${symbol}</div>
+          </div>
+        </div>
+      `;
+
+      if (isPlayable && isMyTurn) {
+        cardEl.addEventListener('click', () => {
+          // Trigger card fly animation
+          if (typeof FX !== 'undefined') {
+            const rect = cardEl.getBoundingClientRect();
+            const trickPos = getTrickCardPositions();
+            const targetPos = trickPos[0]; // player's own trick position
+            const innerHtml = cardEl.querySelector('.card-inner') ? cardEl.querySelector('.card-inner').innerHTML : '';
+            FX.cardPlayFly(rect, targetPos.x, targetPos.y, innerHtml);
+          }
+          cardEl.classList.add('played');
+          Game.playCard(card.id);
+        });
+      }
+
+      handEl.appendChild(cardEl);
+    });
+  }
+
+  function renderTrick(state) {
+    const trickEl = document.getElementById('current-trick');
+    trickEl.innerHTML = '';
+
+    const trick = state.currentRound.currentTrick;
+    if (!trick || trick.length === 0) return;
+
+    const mySeat = Game.getMySeat();
+    const positions = getTrickCardPositions();
+
+    trick.forEach(({ playerIndex, card }) => {
+      const relIdx = ((playerIndex - mySeat + 6) % 6);
+      const pos = positions[relIdx];
+      const color = SUIT_COLORS[card.suit] || '#333';
+      const symbol = SUIT_SYMBOLS[card.suit] || '';
+      let displayRank = card.rank;
+      if (card.id === 'BIG_JOKER') displayRank = 'BIG';
+      if (card.id === 'SMALL_JOKER') displayRank = 'SM';
+
+      // Get player name for label
+      const player = state.players[playerIndex];
+      const playerLabel = playerIndex === mySeat ? 'You' : (player ? player.name : '?');
+
+      const el = document.createElement('div');
+      el.className = 'trick-card';
+      el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
+      el.innerHTML = `
+        <div class="card-mini" style="color:${color}">
+          <span class="card-rank">${displayRank}</span>
+          <span class="card-suit">${symbol}</span>
+        </div>
+        <div class="trick-card-label">${playerLabel}</div>
+      `;
+      trickEl.appendChild(el);
+    });
+  }
+
+  function getTrickCardPositions() {
+    // Positions closer to center for trick cards
+    return [
+      { x: 50, y: 62 },   // Me (bottom)
+      { x: 35, y: 52 },   // Left
+      { x: 35, y: 35 },   // Top-left
+      { x: 50, y: 28 },   // Top
+      { x: 65, y: 35 },   // Top-right
+      { x: 65, y: 52 },   // Right
+    ];
+  }
+
+  function renderGameInfo(state, mySeat) {
+    const infoEl = document.getElementById('game-info');
+    const current = state.currentRound.currentPlayer;
+    const player = state.players[current];
+
+    if (state.phase === 'BIDDING') {
+      if (current === mySeat) {
+        infoEl.textContent = 'Your turn to bid';
+      } else {
+        infoEl.textContent = `${player ? player.name : '?'} is bidding...`;
+      }
+    } else if (state.phase === 'TRUMP_SELECT') {
+      if (state.currentRound.bidder === mySeat) {
+        infoEl.textContent = 'Select the trump suit';
+      } else {
+        const bidder = state.players[state.currentRound.bidder];
+        infoEl.textContent = `${bidder ? bidder.name : '?'} is selecting trump...`;
+      }
+    } else if (state.phase === 'PLAYING') {
+      if (current === mySeat) {
+        infoEl.textContent = 'Your turn \u2014 play a card';
+      } else {
+        infoEl.textContent = `${player ? player.name : '?'} is playing...`;
+      }
+    } else if (state.phase === 'RAISE_CHECK') {
+      infoEl.textContent = 'Bidding team can raise their bid...';
+    } else if (state.phase === 'ROUND_END') {
+      infoEl.textContent = 'Round over \u2014 next round starting...';
+    } else if (state.phase === 'SHUFFLING') {
+      infoEl.textContent = 'Shuffling cards...';
+    }
+
+    // Trick counter
+    document.getElementById('trick-counter').textContent = `Trick ${state.currentRound.tricksPlayed + 1} of 9`;
+  }
+
+  // === ROUND HISTORY ===
+  function renderRoundHistory(state, mySeat) {
+    const el = document.getElementById('round-history');
+    if (!el) return;
+    const history = state.roundHistory;
+    if (!history || history.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const myTeam = Engine.getTeam(mySeat);
+    const oppTeam = myTeam === 'A' ? 'B' : 'A';
+
+    // Count rounds won by each team
+    let myRoundsWon = 0;
+    let oppRoundsWon = 0;
+    for (const r of history) {
+      if ((r.scoreChange[myTeam] || 0) > 0) myRoundsWon++;
+      else if ((r.scoreChange[oppTeam] || 0) > 0) oppRoundsWon++;
+    }
+
+    // Build compact round dots
+    let dotsHtml = '';
+    for (let i = 0; i < history.length; i++) {
+      const r = history[i];
+      const myPts = r.scoreChange[myTeam] || 0;
+      const oppPts = r.scoreChange[oppTeam] || 0;
+      let dotClass = 'draw';
+      let label = '=';
+      if (myPts > 0) { dotClass = 'team-a'; label = '+' + myPts; }
+      else if (oppPts > 0) { dotClass = 'team-b'; label = '+' + oppPts; }
+      dotsHtml += `<div class="round-dot ${dotClass}" title="Round ${i + 1}: ${label}">${i + 1}</div>`;
+    }
+
+    el.innerHTML = `
+      <div class="round-history-label">Rounds</div>
+      <div class="round-history-row">${dotsHtml}</div>
+      <div class="round-history-score">You ${myRoundsWon} \u2013 ${oppRoundsWon} Opp</div>
+    `;
+  }
+
+  // === BIDDING UI ===
+  function renderBiddingUI(state, mySeat) {
+    const panel = document.getElementById('bidding-panel');
+    if (state.phase !== 'BIDDING' || state.currentRound.currentBidder !== mySeat) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'flex';
+    panel.innerHTML = '<div class="bid-title">Your Bid</div><div class="bid-buttons"></div>';
+    const btns = panel.querySelector('.bid-buttons');
+
+    // Pass button
+    const passBtn = document.createElement('button');
+    passBtn.className = 'bid-btn pass-btn';
+    passBtn.textContent = 'Pass';
+    passBtn.addEventListener('click', () => Game.makeBid(0));
+    btns.appendChild(passBtn);
+
+    // Bid buttons (5-9, only valid ones)
+    for (let b = 5; b <= 9; b++) {
+      if (Engine.isValidBid(b, state.currentRound.bid)) {
+        const btn = document.createElement('button');
+        btn.className = 'bid-btn';
+        btn.textContent = b;
+        btn.addEventListener('click', () => Game.makeBid(b));
+        btns.appendChild(btn);
+      }
+    }
+  }
+
+  // === TRUMP SELECT UI ===
+  function renderTrumpSelectUI(state, mySeat) {
+    const panel = document.getElementById('trump-select-panel');
+    if (state.phase !== 'TRUMP_SELECT' || state.currentRound.bidder !== mySeat) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'flex';
+    panel.innerHTML = '<div class="bid-title">Select Trump Suit</div><div class="trump-buttons"></div>';
+    const btns = panel.querySelector('.trump-buttons');
+
+    Engine.SUITS.forEach(suit => {
+      const btn = document.createElement('button');
+      btn.className = 'trump-btn';
+      btn.style.color = SUIT_COLORS[suit];
+      btn.innerHTML = `${SUIT_SYMBOLS[suit]}<br><span>${suit}</span>`;
+      btn.addEventListener('click', () => Game.selectTrump(suit));
+      btns.appendChild(btn);
+    });
+  }
+
+  // === RAISE UI ===
+  function renderRaiseUI(state, mySeat) {
+    const panel = document.getElementById('raise-panel');
+    if (state.phase !== 'RAISE_CHECK' || Engine.getTeam(mySeat) !== state.currentRound.biddingTeam) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'flex';
+  }
+
+  function showRaisePrompt(state) {
+    const panel = document.getElementById('raise-panel');
+    panel.style.display = 'flex';
+    panel.innerHTML = `
+      <div class="bid-title">Raise Your Bid?</div>
+      <div class="raise-info">Current bid: ${state.currentRound.bid} | Tricks won: ${state.currentRound.tricksTaken[state.currentRound.biddingTeam]}</div>
+      <div class="bid-buttons" id="raise-buttons"></div>
+    `;
+    const btns = document.getElementById('raise-buttons');
+
+    const noBtn = document.createElement('button');
+    noBtn.className = 'bid-btn pass-btn';
+    noBtn.textContent = 'No Raise';
+    noBtn.addEventListener('click', () => {
+      panel.style.display = 'none';
+      Game.noRaise();
+    });
+    btns.appendChild(noBtn);
+
+    for (let b = state.currentRound.bid + 1; b <= 9; b++) {
+      const btn = document.createElement('button');
+      btn.className = 'bid-btn';
+      btn.textContent = b;
+      if (b === 8) btn.textContent = `${b} (LS)`;
+      if (b === 9) btn.textContent = `${b} (GS)`;
+      btn.addEventListener('click', () => {
+        panel.style.display = 'none';
+        Game.raiseBid(b);
+      });
+      btns.appendChild(btn);
+    }
+  }
+
+  // === RESULTS ===
+  function showRoundResult(result) {
+    const overlay = document.getElementById('result-overlay');
+    overlay.style.display = 'flex';
+
+    const myTeam = Game.getMyTeam();
+    const won = result.scoreChange[myTeam] > 0;
+    let title = won ? 'Round Won!' : 'Round Lost';
+    if (result.gs) title = won ? 'GRAND SLAM!' : 'Grand Slam by Opponents!';
+    if (result.ls) title = won ? 'LITTLE SLAM!' : 'Little Slam by Opponents!';
+
+    overlay.innerHTML = `
+      <div class="result-card ${won ? 'won' : 'lost'} ${result.gs ? 'gs' : ''} ${result.ls ? 'ls' : ''}">
+        <h2>${title}</h2>
+        <div class="result-details">
+          <div>Bid: ${result.bid} by Team ${result.biddingTeam}</div>
+          <div>Tricks \u2014 Team A: ${result.tricksTaken.A} | Team B: ${result.tricksTaken.B}</div>
+          <div class="result-scores">
+            <div>Team A: ${result.totalScores.A} pts ${result.scoreChange.A > 0 ? `(+${result.scoreChange.A})` : ''}</div>
+            <div>Team B: ${result.totalScores.B} pts ${result.scoreChange.B > 0 ? `(+${result.scoreChange.B})` : ''}</div>
+          </div>
+        </div>
+        <button onclick="document.getElementById('result-overlay').style.display='none'" class="result-dismiss">Continue</button>
+      </div>
+    `;
+  }
+
+  function showGameOver(winner, scores) {
+    const overlay = document.getElementById('result-overlay');
+    overlay.style.display = 'flex';
+    const myTeam = Game.getMyTeam();
+    const won = winner === myTeam;
+
+    overlay.innerHTML = `
+      <div class="result-card ${won ? 'won' : 'lost'} game-over">
+        <h2>${won ? 'YOU WIN!' : 'GAME OVER'}</h2>
+        <div class="result-details">
+          <div class="final-score">Team A: ${scores.A} \u2014 Team B: ${scores.B}</div>
+          <div>Team ${winner} wins the game!</div>
+        </div>
+        <button onclick="location.reload()" class="result-dismiss">Play Again</button>
+      </div>
+    `;
+  }
+
+  function animateTrickWin(winner, trickCards) {
+    // Brief flash on winner
+    const winnerName = Game.getState()?.players[winner]?.name || `Player ${winner + 1}`;
+    showToast(`${winnerName} wins the trick!`);
+  }
+
+  // === CHAT ===
+  function addChatMessage(name, text) {
+    const chatEl = document.getElementById('chat-messages');
+    const msgEl = document.createElement('div');
+    msgEl.className = 'chat-msg';
+    msgEl.innerHTML = `<strong>${escapeHtml(name)}:</strong> ${escapeHtml(text)}`;
+    chatEl.appendChild(msgEl);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  // === TOAST ===
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+
+  // === RULES ===
+  function showRules() {
+    document.getElementById('rules-overlay').style.display = 'flex';
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function triggerTrickWinFX(winnerRelIdx, winnerTeam) {
+    if (typeof FX === 'undefined') return;
+    const teamColor = winnerTeam === Engine.getTeam(Game.getMySeat())
+      ? 'var(--team-a)' : 'var(--team-b)';
+    FX.trickWinBurst(winnerRelIdx, teamColor);
+  }
+
+  return {
+    init, showScreen,
+    updateLobby, updateAll,
+    showRaisePrompt, showRoundResult, showGameOver,
+    animateTrickWin, addChatMessage, showToast,
+    showShuffleAnimation,
+    updatePointsDisplay, renderBadgesGrid,
+    triggerTrickWinFX,
+  };
+})();
