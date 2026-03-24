@@ -930,7 +930,7 @@ const Game = (() => {
     // --- Card counting: build set of played cards across all tricks ---
     const playedCards = new Set();
     for (const pastTrick of (state.currentRound.tricks || [])) {
-      for (const cp of pastTrick) playedCards.add(cp.card.id);
+      for (const cp of (pastTrick.cards || pastTrick)) playedCards.add(cp.card?.id || cp.id);
     }
     for (const cp of trick) playedCards.add(cp.card.id);
 
