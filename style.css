@@ -939,19 +939,20 @@ html, body {
   align-items: center;
   gap: 14px;
   position: fixed;
-  bottom: 0;
-  left: 0; right: 0;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92vw, 360px);
   background: var(--bg-surface);
-  border-top: 1px solid var(--border-bright);
-  border-radius: var(--sheet-radius);
-  padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
-  z-index: 30;
-  box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
-  animation: sheetUp 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  padding: 22px 20px 24px;
+  z-index: 50;
+  box-shadow: 0 8px 48px rgba(0,0,0,0.75);
+  animation: panelPop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes sheetUp {
-  from { transform: translateY(100%); }
-  to   { transform: translateY(0); }
+@keyframes panelPop {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.95); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 .bid-title {
   font-size: 13px; font-weight: 700;
@@ -1370,14 +1371,6 @@ html, body {
   .card-mini .card-rank { font-size: 17px; }
   .card-mini .card-suit { font-size: 21px; }
   .card-back { width: 24px; height: 36px; }
-  #bidding-panel, #trump-select-panel, #raise-panel {
-    bottom: auto;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    border-radius: var(--radius);
-    width: auto;
-    animation: resultIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  }
   #input-overlay { align-items: center; }
   .input-dialog { border-radius: var(--radius); animation: resultIn 0.28s cubic-bezier(0.16,1,0.3,1); }
   #result-overlay, #rules-overlay { align-items: center; padding: 24px; }
