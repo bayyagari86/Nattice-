@@ -406,14 +406,22 @@ const UI = (() => {
         }
       }
 
+      // Odia quirky phrase reactions — label on button, full Odia script phrase floats
+      const ODIA_REACTIONS = [
+        { label: '👍 ସହି!',    phrase: 'ସହି ବାତ! 👍',              chat: 'ସହି ବାତ! 👍' },
+        { label: '😮 ଏ କି!',  phrase: 'ଏ କି ହେଲା?! 😮',            chat: 'ଏ କି ହେଲା?! 😮' },
+        { label: '🔥 ଧମାକା!', phrase: 'ଏଇଟା ଧମାକା! 🔥',           chat: 'ଏଇଟା ଧମାକା! 🔥' },
+        { label: '😂 ଦାଦା!',  phrase: 'ଦାଦା, କଣ କଲେ? 😂',          chat: 'ଦାଦା, କଣ କଲେ? 😂' },
+        { label: '🃏 ଜୋକର!',  phrase: 'ଜୋକର ଦେବ ନାହିଁ! 🃏',       chat: 'ଜୋକର ଦେବ ନାହିଁ! 🃏' },
+        { label: '😤 ହୁଁ!',   phrase: 'ହଁ ହଁ! ହୁଁ! 😤',            chat: 'ହଁ ହଁ! ହୁଁ! 😤' },
+      ];
       const reactionBarHtml = seat === mySeat
-        ? `<div class="reaction-bar">
-            <button class="reaction-btn" data-emoji="\ud83d\udc4d">👍</button>
-            <button class="reaction-btn" data-emoji="\ud83d\ude2e">😮</button>
-            <button class="reaction-btn" data-emoji="\ud83d\udd25">🔥</button>
-            <button class="reaction-btn" data-emoji="\ud83d\udc80">💀</button>
-           </div>`
+        ? `<div class="reaction-bar">${ODIA_REACTIONS.map((r,idx) =>
+            `<button class="reaction-btn" data-idx="${idx}">${r.label}</button>`
+          ).join('')}</div>`
         : '';
+      // Store reactions on element for event binding
+      el._odiaReactions = ODIA_REACTIONS;
 
       el.innerHTML = `
         <div class="reaction-float" id="reaction-float-${seat}"></div>
@@ -424,13 +432,15 @@ const UI = (() => {
         ${cardBacksHtml}
       `;
 
-      // Wire up reaction buttons
+      // Wire up Odia reaction buttons
       el.querySelectorAll('.reaction-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const emoji = btn.dataset.emoji;
-          showEmojiReaction(mySeat, emoji);
-          try { Game.sendChat('\u26a1 ' + emoji); } catch(e) {}
+          const idx = parseInt(btn.dataset.idx);
+          const reaction = el._odiaReactions[idx];
+          if (!reaction) return;
+          showEmojiReaction(mySeat, reaction.phrase);
+          try { Game.sendChat(reaction.chat); } catch(ex) {}
         });
       });
 

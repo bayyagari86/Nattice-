@@ -15,14 +15,98 @@ const Game = (() => {
 
   const AI_NAMES = ['Arjun', 'Priya', 'Kiran', 'Meera', 'Ravi'];
 
-  // Extended name pools for rotating bot personalities
-  const AI_NAME_POOL = [
-    ['Arjun','Dev','Rohan','Vikram','Aarav','Siddharth','Nikhil','Kabir'],
-    ['Priya','Ananya','Divya','Sneha','Riya','Nandini','Ishaan','Pooja'],
-    ['Kiran','Rahul','Aditya','Suresh','Arun','Tarun','Varun','Ishan'],
-    ['Meera','Kavya','Shreya','Sunita','Lalita','Geeta','Seema','Rekha'],
-    ['Ravi','Suraj','Chandan','Mohan','Gopal','Deepak','Vinod','Pawan'],
+  // --- AI Memory: learns from human plays each round ---
+  // Tracks per-seat: suit void tendencies, trump usage pattern, joker sightings
+  let aiMemory = {
+    suitVoids: {},        // seat -> Set of suits they've shown void in
+    trumpUsed: {},        // seat -> count of trump cards played
+    jokerSeen: {},        // 'BIG_JOKER'/'SMALL_JOKER' -> seat that played it (or null)
+    highCardPlayed: {},   // seat -> { suit -> highest rank seen }
+    humanLeadPatterns: [],// last 5 lead suits from human (seat 0) — detect tendencies
+    opponentTrumpA: {},   // suit -> whether trump Ace has been played
+  };
+
+  function resetAiMemory() {
+    aiMemory = {
+      suitVoids: {}, trumpUsed: {}, jokerSeen: {},
+      highCardPlayed: {}, humanLeadPatterns: [], opponentTrumpA: {},
+    };
+  }
+
+  function updateAiMemoryFromTrick(trick, trump) {
+    for (const cp of trick) {
+      const { playerIndex: seat, card } = cp;
+      const leadSuit = trick[0].card.suit === 'joker' ? null : trick[0].card.suit;
+
+      // Track joker plays
+      if (card.id === 'BIG_JOKER' || card.id === 'SMALL_JOKER') {
+        aiMemory.jokerSeen[card.id] = seat;
+      }
+
+      // Track trump Ace played
+      if (card.suit === trump && card.rank === 'A') {
+        aiMemory.opponentTrumpA[trump] = true;
+      }
+
+      // Track suit voids: player didn't follow suit = void in lead suit
+      if (!aiMemory.suitVoids[seat]) aiMemory.suitVoids[seat] = new Set();
+      if (leadSuit && card.suit !== leadSuit && card.suit !== 'joker') {
+        aiMemory.suitVoids[seat].add(leadSuit);
+      }
+
+      // Track trump usage count
+      if (card.suit === trump) {
+        aiMemory.trumpUsed[seat] = (aiMemory.trumpUsed[seat] || 0) + 1;
+      }
+
+      // Track high cards seen per seat/suit
+      if (!aiMemory.highCardPlayed[seat]) aiMemory.highCardPlayed[seat] = {};
+      if (card.suit && card.suit !== 'joker') {
+        const prev = aiMemory.highCardPlayed[seat][card.suit] || 0;
+        aiMemory.highCardPlayed[seat][card.suit] = Math.max(prev, Engine.RANK_VALUES[card.rank] || 0);
+      }
+
+      // Track human (seat 0) lead patterns
+      if (seat === 0 && cp === trick[0] && leadSuit) {
+        aiMemory.humanLeadPatterns.push(leadSuit);
+        if (aiMemory.humanLeadPatterns.length > 6) aiMemory.humanLeadPatterns.shift();
+      }
+    }
+  }
+
+  // Themed name sets — each set of 5 used together as a lobby persona batch
+  // Rotate the ENTIRE set after each full game (62 pts reached)
+  const AI_NAME_SETS = [
+    // 0 — Classic South Indian
+    ['Arjun','Priya','Kiran','Meera','Ravi'],
+    // 1 — North Indian Metro
+    ['Dev','Aanya','Rohan','Simran','Nikhil'],
+    // 2 — Odia Traditional ✨
+    ['Biswa','Sasmita','Pradyumna','Sulochana','Tapan'],
+    // 3 — Odia Modern ✨
+    ['Subha','Lipsa','Debasis','Ankita','Sushant'],
+    // 4 — Odia Coastal/Puri vibes ✨
+    ['Jagannath','Bidulata','Krushna','Mamata','Bapi'],
+    // 5 — Odia Gen Z ✨
+    ['Rishav','Priyanka','Siddharth','Barsha','Dibyajyoti'],
+    // 6 — Pan-Indian Gen Z
+    ['Zara','Ayaan','Myra','Rehan','Tara'],
+    // 7 — Bollywood vibes
+    ['Raj','Simran','Rahul','Pooja','Kabir'],
+    // 8 — Sporty nicknames
+    ['Sunny','Bunny','Rocky','Lucky','Pinky'],
+    // 9 — South Indian Modern
+    ['Aditi','Vikram','Kavya','Siddharth','Divya'],
   ];
+  // Per-seat name pools for mid-round rotation (drawn from all sets)
+  const AI_NAME_POOL = [
+    ['Arjun','Dev','Rohan','Vikram','Biswa','Subha','Rishav','Debasis','Pradyumna','Sushant','Sunny','Raj'],
+    ['Priya','Aanya','Ananya','Sasmita','Lipsa','Barsha','Simran','Pooja','Divya','Ankita','Lucky','Meera'],
+    ['Kiran','Rahul','Aditya','Krushna','Tapan','Siddharth','Rocky','Kabir','Jagannath','Bapi','Nikhil','Ravi'],
+    ['Meera','Simran','Sulochana','Mamata','Bidulata','Priyanka','Tara','Myra','Kavya','Rekha','Geeta','Sneha'],
+    ['Ravi','Nikhil','Dibyajyoti','Sushant','Debasis','Rehan','Bunny','Pinky','Suresh','Mohan','Deepak','Gopal'],
+  ];
+  let aiCurrentSetIdx = 0;
   let aiNameRotateTimer = null;
 
   function getState() { return state; }
@@ -319,6 +403,7 @@ const Game = (() => {
   }
 
   async function startNewRound() {
+    resetAiMemory();
     // Show shuffle animation
     state.phase = 'SHUFFLING';
     UI.updateAll(state, mySeat);
@@ -545,6 +630,8 @@ const Game = (() => {
       state.currentRound.tricksPlayed++;
 
       const trickCards = [...state.currentRound.currentTrick];
+      // Update AI memory from this completed trick
+      updateAiMemoryFromTrick(trickCards, state.currentRound.trumpSuit);
       state.currentRound.tricks.push({
         cards: trickCards,
         winner,
@@ -715,6 +802,16 @@ const Game = (() => {
     if (Engine.isGameOver(state.scores)) {
       const winner = Engine.getWinner(state.scores);
       state.phase = 'GAME_OVER';
+      // Rotate to a new named personality set for the next game
+      if (isSoloMode) {
+        let nextIdx = aiCurrentSetIdx;
+        while (nextIdx === aiCurrentSetIdx) nextIdx = Math.floor(Math.random() * AI_NAME_SETS.length);
+        aiCurrentSetIdx = nextIdx;
+        const newSet = AI_NAME_SETS[aiCurrentSetIdx];
+        for (let i = 1; i < 6; i++) {
+          if (state.players[i]) state.players[i].name = newSet[i - 1];
+        }
+      }
       if (!isSoloMode) Network.broadcast({ type: 'GAME_OVER', winner, scores: state.scores });
       UI.showGameOver(winner, state.scores);
     } else {
@@ -880,85 +977,230 @@ const Game = (() => {
       return false; // Non-trump lead can easily be beaten
     }
 
+    // --- Context flags ---
+    const myTeamBid = state.currentRound.biddingTeam === myTeam;
+    const bidder = state.currentRound.bidder;
+    const isBidder = seat === bidder;
+    const isTeammateBidder = bidder >= 0 && Engine.getTeam(bidder) === myTeam && !isBidder;
+    const tricksLeft = 9 - state.currentRound.tricksPlayed;
+    const teamTricks = state.currentRound.tricksTaken[myTeam] || 0;
+    const oppTeam = myTeam === 'A' ? 'B' : 'A';
+    const oppTricks = state.currentRound.tricksTaken[oppTeam] || 0;
+    const bigJokerGone = !!aiMemory.jokerSeen['BIG_JOKER'];
+    const smallJokerGone = !!aiMemory.jokerSeen['SMALL_JOKER'];
+    const trumpAcePlayed = !!aiMemory.opponentTrumpA[trump];
+    const hasBigJoker = playable.some(c => c.id === 'BIG_JOKER');
+    const hasSmallJoker = playable.some(c => c.id === 'SMALL_JOKER');
+
+    // What card is currently winning (if any)?
+    const currentWinCard = currentWinner !== null
+      ? trick.find(cp => cp.playerIndex === currentWinner)?.card
+      : null;
+    const oppWinningWithJoker = opponentWinning && currentWinCard &&
+      (currentWinCard.id === 'BIG_JOKER' || currentWinCard.id === 'SMALL_JOKER');
+    const oppWinningWithTrumpA = opponentWinning && currentWinCard &&
+      currentWinCard.suit === trump && currentWinCard.rank === 'A';
+    const oppWinningWithHighTrump = opponentWinning && currentWinCard &&
+      currentWinCard.suit === trump && Engine.RANK_VALUES[currentWinCard.rank] >= 10; // K or A
+
     let chosen;
 
     if (isLeading) {
       chosen = aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam);
 
     } else if (teammateWinSafe || teammateWinLikely) {
-      // Teammate is winning and it's secure — dump our cheapest safe card
-      // Prefer dumping off-suit losers, keep trump and high cards
+      // Teammate winning securely — NEVER use Big Joker here, just dump cheap
       chosen = getDumpCard(playable, trump, leadSuit);
 
     } else if (teammateWinning && !isLastPlayer) {
-      // Teammate winning but opponents still to play — still dump cheap
-      // but avoid playing a card that wastes a suit the team needs
+      // Teammate winning but opponents still to act — dump cheap, save big guns
       chosen = getDumpCard(playable, trump, leadSuit);
 
     } else {
-      // Need to try to win — find cheapest card that beats current winner
-      const winningCards = playable.filter(c => {
-        const testTrick = [...trick, { playerIndex: seat, card: c }];
-        const winner = Engine.determineTrickWinnerRefined(testTrick, trump);
-        return winner === seat;
-      });
+      // Need to contest or win this trick
+      // --- BIG JOKER STRATEGY ---
+      // Only use Big Joker when:
+      // 1. Opponent is winning with a joker/trump A that nothing else can beat
+      // 2. This is a critical trick (team needs it to meet/save bid)
+      // 3. It's the last few tricks (tricksLeft <= 3) and we need every trick
+      const criticalTrick = myTeamBid
+        ? teamTricks < state.currentRound.bid  // bidding team needs tricks
+        : oppTricks >= state.currentRound.bid - 1; // defending team must stop them
+      const endgame = tricksLeft <= 3;
 
-      if (winningCards.length > 0) {
-        // Win cheaply — prefer lowest winning non-trump, then lowest trump
-        const nonTrumpWins = winningCards.filter(c => c.suit !== trump && c.suit !== 'joker');
-        if (nonTrumpWins.length > 0) {
-          chosen = nonTrumpWins.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+      if (hasBigJoker) {
+        // Don't use Big Joker if a cheaper card can win
+        const cheapWins = playable.filter(c => {
+          if (c.id === 'BIG_JOKER' || c.id === 'SMALL_JOKER') return false;
+          const testTrick = [...trick, { playerIndex: seat, card: c }];
+          return Engine.determineTrickWinnerRefined(testTrick, trump) === seat;
+        });
+
+        const shouldUseBigJoker =
+          (oppWinningWithJoker || oppWinningWithTrumpA) && criticalTrick ||
+          (cheapWins.length === 0 && criticalTrick && (opponentWinning || endgame));
+
+        if (!shouldUseBigJoker) {
+          // Save Big Joker — try to win cheaply without it
+          if (cheapWins.length > 0) {
+            const nonTrumpCheap = cheapWins.filter(c => c.suit !== trump);
+            chosen = nonTrumpCheap.length > 0
+              ? nonTrumpCheap.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0]
+              : getLowest(cheapWins, trump);
+          } else {
+            chosen = getDumpCard(playable, trump, leadSuit);
+          }
         } else {
-          chosen = getLowest(winningCards, trump);
+          // Use Big Joker — opponent has something unbeatable otherwise
+          chosen = playable.find(c => c.id === 'BIG_JOKER');
+        }
+      } else if (hasSmallJoker) {
+        // SMALL JOKER STRATEGY:
+        // Use it to kill opponent's trump A or high trump when Big Joker is gone
+        // Also use if no trump cards are on table (Small Joker wins)
+        const trumpOnTable = trick.some(cp => cp.card.suit === trump);
+        const smallJokerWins = (() => {
+          const testTrick = [...trick, { playerIndex: seat, card: playable.find(c => c.id === 'SMALL_JOKER') }];
+          return Engine.determineTrickWinnerRefined(testTrick, trump) === seat;
+        })();
+
+        const cheapWins = playable.filter(c => {
+          if (c.suit === 'joker') return false;
+          const testTrick = [...trick, { playerIndex: seat, card: c }];
+          return Engine.determineTrickWinnerRefined(testTrick, trump) === seat;
+        });
+
+        const useSmallJoker = smallJokerWins && (
+          (oppWinningWithTrumpA && bigJokerGone) ||
+          (criticalTrick && cheapWins.length === 0 && !trumpOnTable)
+        );
+
+        if (useSmallJoker) {
+          chosen = playable.find(c => c.id === 'SMALL_JOKER');
+        } else if (cheapWins.length > 0) {
+          const nonTrumpCheap = cheapWins.filter(c => c.suit !== trump);
+          chosen = nonTrumpCheap.length > 0
+            ? nonTrumpCheap.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0]
+            : getLowest(cheapWins, trump);
+        } else {
+          chosen = getDumpCard(playable, trump, leadSuit);
         }
       } else {
-        // Can't win — dump cheapest, protect trump
-        chosen = getDumpCard(playable, trump, leadSuit);
+        // No jokers — standard: find cheapest winning card
+        const winningCards = playable.filter(c => {
+          const testTrick = [...trick, { playerIndex: seat, card: c }];
+          return Engine.determineTrickWinnerRefined(testTrick, trump) === seat;
+        });
+
+        if (winningCards.length > 0) {
+          const nonTrumpWins = winningCards.filter(c => c.suit !== trump);
+          if (nonTrumpWins.length > 0) {
+            chosen = nonTrumpWins.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+          } else {
+            chosen = getLowest(winningCards, trump);
+          }
+        } else {
+          // Can't win — dump to avoid wasting trump
+          // Use memory: if opponent is known void in a suit, don't lead that suit next time
+          chosen = getDumpCard(playable, trump, leadSuit);
+        }
       }
     }
 
+    // Safety fallback
+    if (!chosen) chosen = playable[0];
     processPlayCard(seat, chosen.id);
   }
 
-  // Choose what to lead with — varied and hard to predict
+  // Choose what to lead with — memory-aware and unpredictable
   function aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam) {
-    // 1. Lead a suit where we have the Ace (guaranteed win)
+    const oppTeam = myTeam === 'A' ? 'B' : 'A';
+
+    // Identify opponent seats
+    const oppSeats = [0,1,2,3,4,5].filter(s => Engine.getTeam(s) === oppTeam);
+
+    // Suits the human has been repeatedly leading (patterns to counter)
+    const humanFavSuit = (() => {
+      if (aiMemory.humanLeadPatterns.length < 2) return null;
+      const counts = {};
+      for (const s of aiMemory.humanLeadPatterns) counts[s] = (counts[s] || 0) + 1;
+      const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+      return sorted[0]?.[0] || null;
+    })();
+
+    // Suits where opponents are known to be strong (have played high cards)
+    const oppStrongSuits = new Set();
+    for (const s of oppSeats) {
+      const high = aiMemory.highCardPlayed[s] || {};
+      for (const [suit, val] of Object.entries(high)) {
+        if (val >= 11) oppStrongSuits.add(suit); // K or A seen
+      }
+    }
+
+    // Suits opponents are known void in (great to lead — forces them off-suit)
+    const oppVoidSuits = new Set();
+    for (const s of oppSeats) {
+      const voids = aiMemory.suitVoids[s] || new Set();
+      for (const v of voids) oppVoidSuits.add(v);
+    }
+
+    // 1. Lead a suit opponents are void in (they can't follow, forces trump or dump)
+    const voidLeads = playable.filter(c =>
+      c.suit !== trump && c.suit !== 'joker' && oppVoidSuits.has(c.suit)
+    );
+    if (voidLeads.length > 0) {
+      // Lead highest of that suit — it will win since they're void
+      return voidLeads.sort((a,b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank])[0];
+    }
+
+    // 2. Lead a suit where we have the Ace (guaranteed win)
     const aces = playable.filter(c => c.rank === 'A' && c.suit !== trump && c.suit !== 'joker');
     if (aces.length > 0) {
-      // Lead ace of shortest suit (forces opponents to use up that suit)
-      return aces.sort((a, b) => {
+      // Prefer ace of suit NOT in opponents' strong suits
+      const safeAces = aces.filter(c => !oppStrongSuits.has(c.suit));
+      const pool = safeAces.length > 0 ? safeAces : aces;
+      // Lead ace of shortest suit (clears it out fast)
+      return pool.sort((a, b) => {
         const cA = hand.filter(c => c.suit === a.suit).length;
         const cB = hand.filter(c => c.suit === b.suit).length;
         return cA - cB;
       })[0];
     }
 
-    // 2. Lead a suit where we have King and Ace is already played
+    // 3. Lead a suit where King is now highest (ace played)
     const kings = playable.filter(c => c.rank === 'K' && c.suit !== trump && c.suit !== 'joker');
     for (const k of kings) {
-      const aceOfSuit = `A-${k.suit}`;
-      if (playedCards.has(aceOfSuit)) return k;
+      if (playedCards.has(`A-${k.suit}`)) return k;
     }
 
-    // 3. Lead a long non-trump suit to drain opponents
+    // 4. Counter human's favourite lead — lead a DIFFERENT suit to confuse
     const nonTrump = playable.filter(c => c.suit !== trump && c.suit !== 'joker');
     if (nonTrump.length > 0) {
-      // Pick suit with most cards in hand (longest suit = drain power)
       const suitLengths = {};
       for (const c of hand) {
-        if (c.suit !== trump && c.suit !== 'joker') {
+        if (c.suit !== trump && c.suit !== 'joker')
           suitLengths[c.suit] = (suitLengths[c.suit] || 0) + 1;
-        }
       }
-      const bySuitLen = nonTrump.sort((a, b) => (suitLengths[b.suit] || 0) - (suitLengths[a.suit] || 0));
-      // Lead mid-rank of long suit to obscure hand strength
-      const longSuitCards = bySuitLen.filter(c => c.suit === bySuitLen[0].suit);
+
+      // Avoid human's favourite suit (be unpredictable)
+      const nonFav = nonTrump.filter(c => c.suit !== humanFavSuit);
+      const pool = nonFav.length > 0 ? nonFav : nonTrump;
+
+      // Avoid suits opponents are strong in
+      const safe = pool.filter(c => !oppStrongSuits.has(c.suit));
+      const finalPool = safe.length > 0 ? safe : pool;
+
+      // Sort by suit length desc, then within that suit lead second-highest to hide Ace/King
+      finalPool.sort((a,b) => (suitLengths[b.suit] || 0) - (suitLengths[a.suit] || 0));
+      const longSuit = finalPool[0].suit;
+      const longSuitCards = finalPool.filter(c => c.suit === longSuit)
+        .sort((a,b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank]);
+
       if (longSuitCards.length >= 3) {
-        // Lead second-highest to disguise the Ace/King
-        longSuitCards.sort((a, b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank]);
-        return longSuitCards[Math.min(1, longSuitCards.length - 1)];
+        // Lead 2nd highest — conceals Ace/King, opponent can't read hand
+        return longSuitCards[1];
       }
-      return bySuitLen[0];
+      return finalPool[0];
     }
 
     return playable[0];
@@ -1009,13 +1251,26 @@ const Game = (() => {
     processNoRaise();
   }
 
-  // AI chat responses for solo mode
+  // AI chat responses — mix of English + proper Odia script ✨
   const AI_CHAT_LINES = [
-    'Nice play!', 'Good one!', 'Hmm, interesting move...',
-    'Let\'s go team!', 'Watch out!', 'I see what you did there.',
-    'Trump it!', 'Well played.', 'That was bold!',
+    'Nice play! 👏', 'Good one!', 'Hmm, interesting move...',
+    'Let\'s go team! 💪', 'Watch out! 👀', 'I see what you did there.',
+    'Trump it! 🔥', 'Well played.', 'That was bold!',
     'My turn next...', 'Great trick!', 'Not bad!',
-    'This round is ours!', 'Don\'t count us out yet!',
+    'This round is ours! 🏆', 'Don\'t count us out yet!',
+    // Odia script lines ✨
+    'ଆଜି ଆମେ ଜିତିବା! 🦁',       // Today we will win!
+    'ଏଇ କାର୍ଡ ବଡ଼ ଶକ୍ତ! 💥',     // This card is very strong!
+    'ଦାଦା, କଣ କଲେ? 😂',           // Bro, what did you do?
+    'ମିଠା ଖେଳ ଖେଳୁଛ! 🍬',         // Playing a sweet game!
+    'ଜୋକର ଦେବ ନାହିଁ! 🃏',         // Won\'t give the joker!
+    'ପାଗଳ ହୋଇଗଲ କି? 😵',          // Have you gone crazy?
+    'ସହି ବାତ! 👍',                  // Correct thing!
+    'ଆମ ଟିମ୍ ବେଷ୍ଟ! 🤝',           // Our team is the best!
+    'ଟ୍ରମ୍ପ ଦିଅ ଏଠି! 😤',           // Give trump here!
+    'ହଁ ହଁ! ହୁଁ! 😤',               // Odia exclamation
+    'ଏଇଟା ଧମାକା! 🔥',              // This is a blast!
+    'ଭଲ ଖେଳ, ଭଲ ଖେଳ! 👌',        // Good game, good game!
   ];
 
   function getRandomAIChatLine() {
