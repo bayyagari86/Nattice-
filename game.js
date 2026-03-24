@@ -826,44 +826,77 @@ const Game = (() => {
     if (playable.length === 1) { processPlayCard(seat, playable[0].id); return; }
 
     const myTeam = Engine.getTeam(seat);
+    const totalPlayers = trick.length + 1; // including me
+    const playersYetToPlay = 6 - totalPlayers; // players after me
     const isLastPlayer = trick.length === 5;
 
-    // Check if teammate is currently winning the trick
+    // --- Card counting: build set of played cards across all tricks ---
+    const playedCards = new Set();
+    for (const pastTrick of (state.currentRound.tricks || [])) {
+      for (const cp of pastTrick) playedCards.add(cp.card.id);
+    }
+    for (const cp of trick) playedCards.add(cp.card.id);
+
+    // --- Who is currently winning this trick? ---
+    let currentWinner = null;
     let teammateWinning = false;
+    let opponentWinning = false;
     if (trick.length > 0) {
-      const currentWinner = Engine.determineTrickWinnerRefined(trick, trump);
+      currentWinner = Engine.determineTrickWinnerRefined(trick, trump);
       teammateWinning = Engine.getTeam(currentWinner) === myTeam;
+      opponentWinning = !teammateWinning;
+    }
+
+    // --- Will my teammate still win after remaining players play? ---
+    // Conservative: only trust teammate win if no opponents play after us
+    const opponentSeatsAfter = [];
+    for (let i = 1; i <= playersYetToPlay; i++) {
+      const futureSeat = (seat + i) % 6;
+      if (Engine.getTeam(futureSeat) !== myTeam) opponentSeatsAfter.push(futureSeat);
+    }
+    const teammateWinSafe = teammateWinning && opponentSeatsAfter.length === 0;
+    const teammateWinLikely = teammateWinning && opponentSeatsAfter.length > 0
+      && currentWinner !== null
+      && isTrickWinLikelySecure(trick, trump, opponentSeatsAfter, state);
+
+    // --- Helper: check if winning card is strong enough opponents can't beat it ---
+    function isTrickWinLikelySecure(trickSoFar, trump, oppSeats, st) {
+      const winnerIdx = Engine.determineTrickWinnerRefined(trickSoFar, trump);
+      const winCard = trickSoFar.find(cp => cp.playerIndex === winnerIdx).card;
+      // If winning card is a joker or trump A/K, it's very likely secure
+      if (winCard.id === 'BIG_JOKER') return true;
+      if (winCard.id === 'SMALL_JOKER') {
+        // Safe only if no trump cards in opponents' potential hands
+        return !oppSeats.some(s => (st.hands[s] || []).some(c => c.suit === trump));
+      }
+      if (winCard.suit === trump) {
+        const winVal = Engine.RANK_VALUES[winCard.rank];
+        // Safe if no higher trump left (check opponents' hands)
+        const higherTrumpExists = oppSeats.some(s =>
+          (st.hands[s] || []).some(c => c.suit === trump && Engine.RANK_VALUES[c.rank] > winVal)
+        );
+        return !higherTrumpExists;
+      }
+      return false; // Non-trump lead can easily be beaten
     }
 
     let chosen;
 
     if (isLeading) {
-      // LEADING: cannot lead with joker — play strongest suited card
-      const aces = playable.filter(c => c.rank === 'A');
-      if (aces.length > 0) {
-        // Lead with Ace of longest suit
-        chosen = aces.sort((a, b) => {
-          const countA = hand.filter(c => c.suit === a.suit).length;
-          const countB = hand.filter(c => c.suit === b.suit).length;
-          return countB - countA;
-        })[0];
-      } else {
-        // Lead highest non-trump suited card
-        const nonTrump = playable.filter(c => c.suit !== trump);
-        if (nonTrump.length > 0) {
-          chosen = nonTrump.sort((a, b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank])[0];
-        } else {
-          chosen = playable[0];
-        }
-      }
+      chosen = aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam);
+
+    } else if (teammateWinSafe || teammateWinLikely) {
+      // Teammate is winning and it's secure — dump our cheapest safe card
+      // Prefer dumping off-suit losers, keep trump and high cards
+      chosen = getDumpCard(playable, trump, leadSuit);
+
     } else if (teammateWinning && !isLastPlayer) {
-      // Teammate winning — play lowest card to save strength
-      chosen = getLowest(playable, trump);
-    } else if (isLastPlayer && teammateWinning) {
-      // Last player, teammate winning — dump lowest
-      chosen = getLowest(playable, trump);
+      // Teammate winning but opponents still to play — still dump cheap
+      // but avoid playing a card that wastes a suit the team needs
+      chosen = getDumpCard(playable, trump, leadSuit);
+
     } else {
-      // Need to win — play cheapest winning card
+      // Need to try to win — find cheapest card that beats current winner
       const winningCards = playable.filter(c => {
         const testTrick = [...trick, { playerIndex: seat, card: c }];
         const winner = Engine.determineTrickWinnerRefined(testTrick, trump);
@@ -871,26 +904,92 @@ const Game = (() => {
       });
 
       if (winningCards.length > 0) {
-        // Play the cheapest winning card
-        chosen = getLowest(winningCards, trump);
+        // Win cheaply — prefer lowest winning non-trump, then lowest trump
+        const nonTrumpWins = winningCards.filter(c => c.suit !== trump && c.suit !== 'joker');
+        if (nonTrumpWins.length > 0) {
+          chosen = nonTrumpWins.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+        } else {
+          chosen = getLowest(winningCards, trump);
+        }
       } else {
-        // Can't win — dump lowest
-        chosen = getLowest(playable, trump);
+        // Can't win — dump cheapest, protect trump
+        chosen = getDumpCard(playable, trump, leadSuit);
       }
     }
 
     processPlayCard(seat, chosen.id);
   }
 
+  // Choose what to lead with — varied and hard to predict
+  function aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam) {
+    // 1. Lead a suit where we have the Ace (guaranteed win)
+    const aces = playable.filter(c => c.rank === 'A' && c.suit !== trump && c.suit !== 'joker');
+    if (aces.length > 0) {
+      // Lead ace of shortest suit (forces opponents to use up that suit)
+      return aces.sort((a, b) => {
+        const cA = hand.filter(c => c.suit === a.suit).length;
+        const cB = hand.filter(c => c.suit === b.suit).length;
+        return cA - cB;
+      })[0];
+    }
+
+    // 2. Lead a suit where we have King and Ace is already played
+    const kings = playable.filter(c => c.rank === 'K' && c.suit !== trump && c.suit !== 'joker');
+    for (const k of kings) {
+      const aceOfSuit = `A-${k.suit}`;
+      if (playedCards.has(aceOfSuit)) return k;
+    }
+
+    // 3. Lead a long non-trump suit to drain opponents
+    const nonTrump = playable.filter(c => c.suit !== trump && c.suit !== 'joker');
+    if (nonTrump.length > 0) {
+      // Pick suit with most cards in hand (longest suit = drain power)
+      const suitLengths = {};
+      for (const c of hand) {
+        if (c.suit !== trump && c.suit !== 'joker') {
+          suitLengths[c.suit] = (suitLengths[c.suit] || 0) + 1;
+        }
+      }
+      const bySuitLen = nonTrump.sort((a, b) => (suitLengths[b.suit] || 0) - (suitLengths[a.suit] || 0));
+      // Lead mid-rank of long suit to obscure hand strength
+      const longSuitCards = bySuitLen.filter(c => c.suit === bySuitLen[0].suit);
+      if (longSuitCards.length >= 3) {
+        // Lead second-highest to disguise the Ace/King
+        longSuitCards.sort((a, b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank]);
+        return longSuitCards[Math.min(1, longSuitCards.length - 1)];
+      }
+      return bySuitLen[0];
+    }
+
+    return playable[0];
+  }
+
+  // Dump the least valuable card — protect trump, jokers, and high suited cards
+  function getDumpCard(playable, trump, leadSuit) {
+    // Sort by value ascending: off-suit low ranks first, then lead-suit low, then trump low, jokers last
+    const sorted = [...playable].sort((a, b) => {
+      const valA = dumpValue(a, trump, leadSuit);
+      const valB = dumpValue(b, trump, leadSuit);
+      return valA - valB;
+    });
+    return sorted[0];
+  }
+
+  function dumpValue(card, trump, leadSuit) {
+    if (card.id === 'BIG_JOKER') return 10000;
+    if (card.id === 'SMALL_JOKER') return 9000;
+    if (card.suit === trump) return 500 + Engine.RANK_VALUES[card.rank];
+    if (card.suit === leadSuit) return 200 + Engine.RANK_VALUES[card.rank];
+    // Off-suit: lowest value to dump
+    return Engine.RANK_VALUES[card.rank];
+  }
+
   function getLowest(cards, trump) {
     return cards.sort((a, b) => {
-      // Jokers are high value, save them
       if (a.suit === 'joker') return 1;
       if (b.suit === 'joker') return -1;
-      // Trump cards are valuable, save them
       if (a.suit === trump && b.suit !== trump) return 1;
       if (b.suit === trump && a.suit !== trump) return -1;
-      // Lower rank = less valuable
       return Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank];
     })[0];
   }
