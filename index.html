@@ -31,47 +31,55 @@
 <meta name="apple-mobile-web-app-title" content="Trump Call">
 <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-<link rel="stylesheet" href="./style.css?v=13">
+<link rel="stylesheet" href="./style.css?v=14">
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
 <!-- TITLE SCREEN -->
 <div id="title-screen" class="screen active">
-  <div class="title-logo">
-    <svg viewBox="0 0 120 120" width="80" height="80" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Trump Call Logo">
-      <rect x="8" y="16" width="48" height="68" rx="6" stroke="#d4a853" stroke-width="3" fill="none" transform="rotate(-12 32 50)"/>
-      <rect x="64" y="16" width="48" height="68" rx="6" stroke="#d4a853" stroke-width="3" fill="none" transform="rotate(12 88 50)"/>
-      <text x="32" y="56" text-anchor="middle" fill="#d4a853" font-size="24" font-weight="bold" transform="rotate(-12 32 50)">A</text>
-      <text x="88" y="56" text-anchor="middle" fill="#d4a853" font-size="24" font-weight="bold" transform="rotate(12 88 50)">&#9824;</text>
-      <circle cx="60" cy="95" r="12" fill="#d4a853" opacity="0.9"/>
-      <text x="60" y="100" text-anchor="middle" fill="#0d1117" font-size="14" font-weight="bold">6</text>
-    </svg>
-    <h1>Trump Call</h1>
-    <p>Encrypted 6-Player Card Game</p>
+  <div class="version-tag">v14</div>
+
+  <!-- Animated card fan backdrop -->
+  <div class="title-card-fan">
+    <div class="fan-card" data-suit="♠"></div>
+    <div class="fan-card" data-suit="♥"></div>
+    <div class="fan-card" data-suit="♦"></div>
+    <div class="fan-card" data-suit="♣"></div>
+    <div class="fan-card" data-suit="★"></div>
+    <div class="fan-card" data-suit="A"></div>
   </div>
 
-  <div class="version-tag">v13</div>
-  <div class="encrypted-badge">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
-    AES-256-GCM End-to-End Encrypted
-  </div>
+  <!-- Title content panel -->
+  <div class="title-content">
+    <div class="title-logo">
+      <div class="nattice-title-badge">N</div>
+      <h1>Nattice</h1>
+      <p>Trump Call &middot; 6-Player Encrypted Card Game</p>
+    </div>
 
-  <div id="install-banner" class="install-banner" style="display:none">
-    <span>Install as app for the best experience</span>
-    <button id="install-btn" class="btn btn-primary" style="padding:10px 20px;font-size:14px;">Install App</button>
-    <button id="install-dismiss" class="btn btn-ghost" style="padding:4px;font-size:18px;">&times;</button>
-  </div>
+    <div class="encrypted-badge">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+      AES-256-GCM Encrypted
+    </div>
 
-  <div class="title-actions">
-    <button id="solo-btn" class="btn btn-primary">Play vs Computer</button>
-    <div class="mode-divider"><span>or play online</span></div>
-    <button id="host-btn" class="btn btn-secondary">Host a Game</button>
-    <button id="join-btn" class="btn btn-secondary">Join a Game</button>
-    <button id="rules-btn" class="btn btn-ghost">View Rules</button>
+    <div id="install-banner" class="install-banner" style="display:none">
+      <span>Install as app for the best experience</span>
+      <button id="install-btn" class="btn btn-primary" style="padding:10px 20px;font-size:14px;">Install App</button>
+      <button id="install-dismiss" class="btn btn-ghost" style="padding:4px;font-size:18px;">&times;</button>
+    </div>
+
+    <div class="title-actions">
+      <button id="solo-btn" class="btn btn-primary">Play vs Computer</button>
+      <div class="mode-divider"><span>or play online</span></div>
+      <button id="host-btn" class="btn btn-secondary">Host a Game</button>
+      <button id="join-btn" class="btn btn-secondary">Join a Game</button>
+      <button id="rules-btn" class="btn btn-ghost">View Rules</button>
+    </div>
   </div>
 </div>
 
@@ -89,6 +97,10 @@
       Host ID: <span id="host-id-display"></span>
       <br><small>Share both the Room Code and Host ID with players</small>
     </div>
+    <div id="qr-code-container" style="display:none">
+      <div id="qr-code"></div>
+      <div id="qr-code-label">Scan to join &middot; Share Room Code too</div>
+    </div>
   </div>
 
   <div id="lobby-seats"></div>
@@ -100,6 +112,10 @@
 <div id="game-screen" class="screen">
   <!-- Top Bar -->
   <div class="game-topbar">
+    <div class="nattice-wordmark">
+      <span class="nattice-logo">N</span>
+      <span class="nattice-name">Nattice</span>
+    </div>
     <button id="badges-toggle" class="badges-toggle-btn" title="Badges & Points">
       <span class="badges-icon">🏆</span>
       <span class="badges-pts" id="topbar-points">0</span>
@@ -141,13 +157,23 @@
 
   <!-- Hand Area -->
   <div class="hand-area">
+    <button id="chat-toggle-btn" class="chat-toggle-btn" title="Chat">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span id="chat-unread" class="chat-unread" style="display:none">0</span>
+    </button>
     <div id="my-hand"></div>
   </div>
 
   <!-- Chat -->
-  <div class="chat-area">
+  <div class="chat-area" id="chat-area">
+    <div class="chat-header">
+      <span>Chat</span>
+      <button id="chat-close-btn" class="chat-close-btn">&times;</button>
+    </div>
     <div id="chat-messages"></div>
-    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+    <div class="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+    </div>
   </div>
 
   <!-- Badges Panel (slide-in) -->
@@ -245,13 +271,13 @@
 </div>
 
 <!-- Scripts -->
-<script src="./crypto.js?v=13"></script>
-<script src="./engine.js?v=13"></script>
-<script src="./network.js?v=13"></script>
-<script src="./ui.js?v=13"></script>
-<script src="./badges.js?v=13"></script>
-<script src="./fx.js?v=13"></script>
-<script src="./game.js?v=13"></script>
+<script src="./crypto.js?v=14"></script>
+<script src="./engine.js?v=14"></script>
+<script src="./network.js?v=14"></script>
+<script src="./ui.js?v=14"></script>
+<script src="./badges.js?v=14"></script>
+<script src="./fx.js?v=14"></script>
+<script src="./game.js?v=14"></script>
 <script>
   // Service Worker registration
   if ('serviceWorker' in navigator) {

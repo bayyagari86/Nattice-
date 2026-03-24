@@ -15,6 +15,16 @@ const Game = (() => {
 
   const AI_NAMES = ['Arjun', 'Priya', 'Kiran', 'Meera', 'Ravi'];
 
+  // Extended name pools for rotating bot personalities
+  const AI_NAME_POOL = [
+    ['Arjun','Dev','Rohan','Vikram','Aarav','Siddharth','Nikhil','Kabir'],
+    ['Priya','Ananya','Divya','Sneha','Riya','Nandini','Ishaan','Pooja'],
+    ['Kiran','Rahul','Aditya','Suresh','Arun','Tarun','Varun','Ishan'],
+    ['Meera','Kavya','Shreya','Sunita','Lalita','Geeta','Seema','Rekha'],
+    ['Ravi','Suraj','Chandan','Mohan','Gopal','Deepak','Vinod','Pawan'],
+  ];
+  let aiNameRotateTimer = null;
+
   function getState() { return state; }
   function getMySeat() { return mySeat; }
   function getMyTeam() { return Engine.getTeam(mySeat); }
@@ -41,8 +51,29 @@ const Game = (() => {
     }
 
     UI.showToast('Game started \u2014 you are on Team A with ' + AI_NAMES[1] + ' & ' + AI_NAMES[3]);
+    startAINameRotation();
     startNewRound();
   }
+
+  // Rotate AI bot names once between rounds (called at ROUND_END)
+  function rotateAINamesBetweenRounds() {
+    if (!state || !isSoloMode) return;
+    for (let i = 1; i < 6; i++) {
+      const pool = AI_NAME_POOL[i - 1];
+      const currentName = state.players[i]?.name;
+      let newName = currentName;
+      let tries = 0;
+      while (newName === currentName && tries++ < 20) {
+        newName = pool[Math.floor(Math.random() * pool.length)];
+      }
+      if (state.players[i] && newName !== currentName) {
+        state.players[i].name = newName;
+      }
+    }
+  }
+
+  function startAINameRotation() { /* no-op — names now rotate between rounds */ }
+  function stopAINameRotation() { /* no-op */ }
 
   // Initialize a new game as host
   async function hostGame(playerName) {
@@ -689,6 +720,7 @@ const Game = (() => {
     } else {
       state.dealer = (state.dealer + 1) % 6;
       state.phase = 'ROUND_END';
+      rotateAINamesBetweenRounds();
       broadcastState();
       // Auto-start next round after delay
       setTimeout(() => {
@@ -931,5 +963,6 @@ const Game = (() => {
     getState, getMySeat, getMyTeam,
     makeBid, selectTrump, playCard,
     raiseBid, noRaise, sendChat,
+    stopAINameRotation,
   };
 })();

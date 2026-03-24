@@ -27,6 +27,25 @@ const UI = (() => {
       document.getElementById('badges-panel').classList.remove('open');
     });
 
+    // Chat drawer toggle
+    document.getElementById('chat-toggle-btn').addEventListener('click', () => {
+      document.getElementById('chat-area').classList.add('open');
+      document.getElementById('chat-unread').style.display = 'none';
+      document.getElementById('chat-unread').textContent = '0';
+      setTimeout(() => document.getElementById('chat-input').focus(), 300);
+    });
+    document.getElementById('chat-close-btn').addEventListener('click', () => {
+      document.getElementById('chat-area').classList.remove('open');
+    });
+
+    // Send chat on Enter
+    document.getElementById('chat-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = e.target.value.trim();
+        if (val) { Game.sendChat(val); e.target.value = ''; }
+      }
+    });
+
     // Register badge earned callback
     Badges.onBadgeEarned((badge) => {
       showBadgePopup(badge);
@@ -50,12 +69,27 @@ const UI = (() => {
       showScreen('lobby-screen');
       document.getElementById('lobby-status').textContent = 'Creating room...';
       Game.hostGame(name).then(roomCode => {
+        const hostId = Network.getPeerId() || '';
         document.getElementById('room-code-display').textContent = roomCode;
-        document.getElementById('host-id-display').textContent = Network.getPeerId() || '';
+        document.getElementById('host-id-display').textContent = hostId;
         document.getElementById('room-code-section').style.display = 'flex';
         document.getElementById('lobby-status').textContent = 'Waiting for players...';
         document.getElementById('start-game-btn').style.display = 'block';
         document.getElementById('start-game-btn').addEventListener('click', () => Game.startGame());
+
+        // Generate QR code encoding host ID + room code
+        const qrContainer = document.getElementById('qr-code-container');
+        const qrEl = document.getElementById('qr-code');
+        if (typeof QRCode !== 'undefined' && hostId) {
+          qrEl.innerHTML = '';
+          new QRCode(qrEl, {
+            text: `nattice:join?host=${hostId}&room=${roomCode}`,
+            width: 140, height: 140,
+            colorDark: '#0d1219', colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M,
+          });
+          qrContainer.style.display = 'flex';
+        }
       }).catch(err => {
         showToast('Failed to create room: ' + err.message);
         showScreen('title-screen');
@@ -272,8 +306,10 @@ const UI = (() => {
   function updateAll(state, mySeat) {
     if (!state) return;
     if (state.phase === 'WAITING') return;
+    // Only switch screen once — avoid triggering CSS reflows on every update
     if (state.phase !== 'GAME_OVER') {
-      showScreen('game-screen');
+      const gameScreen = document.getElementById('game-screen');
+      if (!gameScreen.classList.contains('active')) showScreen('game-screen');
     }
 
     renderScoreboard(state, mySeat);
@@ -295,16 +331,19 @@ const UI = (() => {
     document.getElementById('my-team-label').textContent = `Team ${myTeam} (You)`;
     document.getElementById('opp-team-label').textContent = `Team ${oppTeam}`;
 
-    // Tricks taken
+    // Tricks taken this round
     const round = state.currentRound;
     document.getElementById('my-team-tricks').textContent = round.tricksTaken[myTeam] || 0;
     document.getElementById('opp-team-tricks').textContent = round.tricksTaken[oppTeam] || 0;
 
-    // Current bid info
+    // Bid info — show bidder name + team + target tricks
     const bidInfo = document.getElementById('bid-info');
     if (round.bid > 0) {
       const bidder = state.players[round.bidder];
-      bidInfo.textContent = `Bid: ${round.bid} by ${bidder ? bidder.name : '?'} (Team ${round.biddingTeam})`;
+      bidInfo.textContent = `Bid ${round.bid} · ${bidder ? bidder.name : '?'} · Team ${round.biddingTeam}`;
+    } else if (state.phase === 'BIDDING') {
+      const currentBidder = state.players[round.currentBidder];
+      bidInfo.textContent = currentBidder ? `${currentBidder.name} bidding…` : 'Bidding…';
     } else {
       bidInfo.textContent = '';
     }
@@ -316,6 +355,17 @@ const UI = (() => {
       trumpInfo.innerHTML = `Trump: <span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${SUIT_SYMBOLS[round.trumpSuit]} ${round.trumpSuit.toUpperCase()}</span>`;
     } else {
       trumpInfo.textContent = '';
+    }
+
+    // Trick counter — show current trick number and whose turn
+    const trickCounter = document.getElementById('trick-counter');
+    if (state.phase === 'PLAYING' || state.phase === 'RAISE_CHECK') {
+      const trickNum = round.tricksPlayed + 1;
+      const currentPlayer = state.players[round.currentPlayer];
+      const turnName = round.currentPlayer === mySeat ? 'Your turn' : (currentPlayer ? `${currentPlayer.name}'s turn` : '');
+      trickCounter.textContent = `Trick ${trickNum}/9 · ${turnName}`;
+    } else {
+      trickCounter.textContent = '';
     }
   }
 
@@ -356,12 +406,34 @@ const UI = (() => {
         }
       }
 
+      const reactionBarHtml = seat === mySeat
+        ? `<div class="reaction-bar">
+            <button class="reaction-btn" data-emoji="\ud83d\udc4d">👍</button>
+            <button class="reaction-btn" data-emoji="\ud83d\ude2e">😮</button>
+            <button class="reaction-btn" data-emoji="\ud83d\udd25">🔥</button>
+            <button class="reaction-btn" data-emoji="\ud83d\udc80">💀</button>
+           </div>`
+        : '';
+
       el.innerHTML = `
+        <div class="reaction-float" id="reaction-float-${seat}"></div>
+        ${reactionBarHtml}
         <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
         <div class="player-name">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
         <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}</div>
         ${cardBacksHtml}
       `;
+
+      // Wire up reaction buttons
+      el.querySelectorAll('.reaction-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const emoji = btn.dataset.emoji;
+          showEmojiReaction(mySeat, emoji);
+          try { Game.sendChat('\u26a1 ' + emoji); } catch(e) {}
+        });
+      });
+
       tableEl.appendChild(el);
     }
   }
@@ -369,7 +441,7 @@ const UI = (() => {
   function getPlayerPositions() {
     // 6 positions around table, index 0 = bottom center (me)
     return [
-      { x: 50, y: 78 },   // Bottom (me)
+      { x: 50, y: 72 },   // Bottom (me)
       { x: 12, y: 58 },   // Bottom-left
       { x: 12, y: 25 },   // Top-left
       { x: 50, y: 8 },    // Top
@@ -380,34 +452,58 @@ const UI = (() => {
 
   function renderHand(state, mySeat) {
     const handEl = document.getElementById('my-hand');
-    handEl.innerHTML = '';
-
     const hand = state.hands[mySeat];
-    if (!hand || hand.length === 0) return;
+
+    if (!hand || hand.length === 0) {
+      handEl.innerHTML = '';
+      return;
+    }
 
     const sorted = Engine.sortHand(hand, state.currentRound.trumpSuit);
     const isLeading = !state.currentRound.currentTrick || state.currentRound.currentTrick.length === 0;
     const leadSuit = !isLeading
       ? (state.currentRound.currentTrick[0].card.suit === 'joker' ? null : state.currentRound.currentTrick[0].card.suit)
       : null;
-    const playable = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat
+    const isMyTurn = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat;
+    const playable = isMyTurn
       ? Engine.getPlayableCards(hand, leadSuit, isLeading)
       : [];
 
-    sorted.forEach((card) => {
-      const isPlayable = playable.find(c => c.id === card.id);
-      const isMyTurn = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat;
+    handEl.innerHTML = '';
+    const total = sorted.length;
+    const isMobile = window.innerWidth < 641;
 
-      const cardEl = document.createElement('div');
-      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${card.suit === state.currentRound.trumpSuit ? 'trump-card' : ''}`;
-      cardEl.dataset.cardId = card.id;
+    // Arc parameters
+    const maxAngle = Math.min(4 * (total - 1), 36); // total spread angle in degrees
+    const arcRise = isMobile ? 18 : 0;              // how much middle cards rise (px)
+    const cardW = isMobile ? 62 : 58;
+    const overlap = isMobile ? 20 : 10;             // horizontal overlap between cards
+    const totalWidth = cardW * total - overlap * (total - 1);
+    const startX = (handEl.offsetWidth || window.innerWidth) / 2 - totalWidth / 2;
 
+    sorted.forEach((card, idx) => {
+      const isPlayable = !!playable.find(c => c.id === card.id);
+      const isTrump = card.suit === state.currentRound.trumpSuit;
       const color = SUIT_COLORS[card.suit] || '#333';
       const symbol = SUIT_SYMBOLS[card.suit] || '';
       let displayRank = card.rank;
       if (card.id === 'BIG_JOKER') displayRank = 'BIG';
       if (card.id === 'SMALL_JOKER') displayRank = 'SM';
 
+      // Arc math: cards fan from -maxAngle/2 to +maxAngle/2
+      const t = total > 1 ? idx / (total - 1) : 0.5;
+      const angle = isMobile ? (t - 0.5) * maxAngle : 0;
+      // Cards in middle rise up more than edges
+      const yOffset = isMobile ? arcRise * (1 - Math.abs(t - 0.5) * 2) : 0;
+      const x = startX + idx * (cardW - overlap);
+      const y = isMobile ? (arcRise - yOffset) : 0;
+
+      const cardEl = document.createElement('div');
+      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${isTrump ? 'trump-card' : ''}`;
+      cardEl.dataset.cardId = card.id;
+      cardEl.style.cssText = isMobile
+        ? `left:${x}px; top:${y}px; transform:rotate(${angle}deg); z-index:${idx + 1};`
+        : `z-index:${idx + 1};`;
       cardEl.innerHTML = `
         <div class="card-inner" style="color:${color}">
           <div class="card-corner top">
@@ -421,22 +517,32 @@ const UI = (() => {
           </div>
         </div>
       `;
-
       if (isPlayable && isMyTurn) {
         cardEl.addEventListener('click', () => {
-          // Trigger card fly animation
           if (typeof FX !== 'undefined') {
             const rect = cardEl.getBoundingClientRect();
             const trickPos = getTrickCardPositions();
-            const targetPos = trickPos[0]; // player's own trick position
+            const targetPos = trickPos[0];
             const innerHtml = cardEl.querySelector('.card-inner') ? cardEl.querySelector('.card-inner').innerHTML : '';
             FX.cardPlayFly(rect, targetPos.x, targetPos.y, innerHtml);
           }
           cardEl.classList.add('played');
           Game.playCard(card.id);
         });
+        // On mobile lift the card up on touch for visual feedback
+        if (isMobile) {
+          cardEl.addEventListener('touchstart', () => {
+            cardEl.style.transform = `rotate(${angle}deg) translateY(-22px) scale(1.08)`;
+            cardEl.style.zIndex = 50;
+            cardEl.style.boxShadow = '0 16px 40px rgba(240,192,64,0.55)';
+          }, { passive: true });
+          cardEl.addEventListener('touchend', () => {
+            cardEl.style.transform = `rotate(${angle}deg)`;
+            cardEl.style.zIndex = idx + 1;
+            cardEl.style.boxShadow = '';
+          }, { passive: true });
+        }
       }
-
       handEl.appendChild(cardEl);
     });
   }
@@ -707,9 +813,19 @@ const UI = (() => {
   }
 
   function animateTrickWin(winner, trickCards) {
-    // Brief flash on winner
     const winnerName = Game.getState()?.players[winner]?.name || `Player ${winner + 1}`;
     showToast(`${winnerName} wins the trick!`);
+  }
+
+  // === EMOJI REACTIONS ===
+  function showEmojiReaction(seat, emoji) {
+    const floatEl = document.getElementById(`reaction-float-${seat}`);
+    if (!floatEl) return;
+    floatEl.textContent = emoji;
+    floatEl.classList.remove('active');
+    void floatEl.offsetWidth;
+    floatEl.classList.add('active');
+    setTimeout(() => floatEl.classList.remove('active'), 1800);
   }
 
   // === CHAT ===
@@ -720,6 +836,15 @@ const UI = (() => {
     msgEl.innerHTML = `<strong>${escapeHtml(name)}:</strong> ${escapeHtml(text)}`;
     chatEl.appendChild(msgEl);
     chatEl.scrollTop = chatEl.scrollHeight;
+
+    // Show unread badge if drawer is closed
+    const drawer = document.getElementById('chat-area');
+    if (!drawer.classList.contains('open')) {
+      const badge = document.getElementById('chat-unread');
+      const count = (parseInt(badge.textContent) || 0) + 1;
+      badge.textContent = count;
+      badge.style.display = 'flex';
+    }
   }
 
   // === TOAST ===
@@ -753,6 +878,7 @@ const UI = (() => {
     init, showScreen,
     updateLobby, updateAll,
     showRaisePrompt, showRoundResult, showGameOver,
+    showEmojiReaction,
     animateTrickWin, addChatMessage, showToast,
     showShuffleAnimation,
     updatePointsDisplay, renderBadgesGrid,
