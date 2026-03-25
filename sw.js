@@ -1,5 +1,5 @@
 // Service Worker for Trump Call PWA
-const CACHE_NAME = 'trump-call-v15';
+const CACHE_NAME = 'trump-call-v16';
 const ASSETS = [
   './',
   './index.html',

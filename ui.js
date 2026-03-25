@@ -16,6 +16,15 @@ const UI = (() => {
   let badgePopupTimeout = null;
 
   function init() {
+    // Check for QR code join params in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const qrHost = urlParams.get('host');
+    const qrRoom = urlParams.get('room');
+    if (qrHost && qrRoom) {
+      // Auto-trigger join dialog with pre-filled values
+      setTimeout(() => showJoinDialog(qrHost, qrRoom), 500);
+    }
+
     document.getElementById('solo-btn').addEventListener('click', startSoloGame);
     document.getElementById('host-btn').addEventListener('click', showHostDialog);
     document.getElementById('join-btn').addEventListener('click', showJoinDialog);
@@ -77,13 +86,14 @@ const UI = (() => {
         document.getElementById('start-game-btn').style.display = 'block';
         document.getElementById('start-game-btn').addEventListener('click', () => Game.startGame());
 
-        // Generate QR code encoding host ID + room code
+        // Generate QR code with web URL for easy joining
         const qrContainer = document.getElementById('qr-code-container');
         const qrEl = document.getElementById('qr-code');
         if (typeof QRCode !== 'undefined' && hostId) {
           qrEl.innerHTML = '';
+          const joinUrl = `${window.location.origin}${window.location.pathname}?host=${hostId}&room=${roomCode}`;
           new QRCode(qrEl, {
-            text: `nattice:join?host=${hostId}&room=${roomCode}`,
+            text: joinUrl,
             width: 140, height: 140,
             colorDark: '#0d1219', colorLight: '#ffffff',
             correctLevel: QRCode.CorrectLevel.M,
@@ -97,11 +107,11 @@ const UI = (() => {
     });
   }
 
-  function showJoinDialog() {
+  function showJoinDialog(prefillHost = '', prefillRoom = '') {
     showMultiInputDialog([
-      { label: 'Your Name', placeholder: 'Player', key: 'name' },
-      { label: 'Room Code', placeholder: 'ABC123', key: 'code' },
-      { label: 'Host ID', placeholder: 'TC_...', key: 'hostId' },
+      { label: 'Your Name', placeholder: 'Player', key: 'name', value: '' },
+      { label: 'Room Code', placeholder: 'ABC123', key: 'code', value: prefillRoom },
+      { label: 'Host ID', placeholder: 'TC_...', key: 'hostId', value: prefillHost },
     ], (vals) => {
       if (!vals.name || !vals.code || !vals.hostId) { showToast('All fields required'); return; }
       showScreen('lobby-screen');
@@ -144,7 +154,7 @@ const UI = (() => {
     const fieldsHtml = fields.map(f => `
       <div class="dialog-field">
         <label>${f.label}</label>
-        <input type="text" data-key="${f.key}" placeholder="${f.placeholder}" autocomplete="off" maxlength="30">
+        <input type="text" data-key="${f.key}" placeholder="${f.placeholder}" value="${f.value || ''}" autocomplete="off" maxlength="30">
       </div>
     `).join('');
     overlay.innerHTML = `
