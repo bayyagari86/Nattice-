@@ -973,7 +973,35 @@ html, body {
   font-size: 13px; font-weight: 700;
   color: var(--accent-gold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+}
+.bid-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(15,21,32,0.6);
+  border-radius: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 280px;
+}
+.bid-history-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #c8d3e8;
+}
+.bid-player {
+  color: #8b9dc3;
+  font-weight: 500;
+}
+.bid-value {
+  color: var(--accent-gold);
+  font-weight: 600;
 }
 .bid-buttons, .trump-buttons {
   display: flex; gap: 8px;

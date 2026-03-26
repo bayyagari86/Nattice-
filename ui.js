@@ -716,7 +716,20 @@ const UI = (() => {
       return;
     }
     panel.style.display = 'flex';
-    panel.innerHTML = '<div class="bid-title">Your Bid</div><div class="bid-buttons"></div>';
+    
+    // Build bid history display
+    let bidHistoryHtml = '';
+    if (state.currentRound.bids && state.currentRound.bids.length > 0) {
+      bidHistoryHtml = '<div class="bid-history">';
+      for (const b of state.currentRound.bids) {
+        const playerName = state.players[b.seat]?.name || `Player ${b.seat + 1}`;
+        const bidText = b.bid === 0 ? 'Pass' : b.bid;
+        bidHistoryHtml += `<div class="bid-history-item"><span class="bid-player">${playerName}:</span> <span class="bid-value">${bidText}</span></div>`;
+      }
+      bidHistoryHtml += '</div>';
+    }
+    
+    panel.innerHTML = `<div class="bid-title">Your Bid</div>${bidHistoryHtml}<div class="bid-buttons"></div>`;
     const btns = panel.querySelector('.bid-buttons');
 
     // Pass button
