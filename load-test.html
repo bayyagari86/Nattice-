@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nattice Load Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #0d1219;
+      color: #c8d3e8;
+      padding: 20px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+    }
+    button {
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover { background: #e8c55b; }
+    .log {
+      background: #0f1520;
+      padding: 15px;
+      border-radius: 8px;
+      max-height: 600px;
+      overflow-y: auto;
+      font-size: 12px;
+    }
+    .success { color: #4ade80; }
+    .error { color: #f87171; }
+    .info { color: #60a5fa; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .stat-box {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #d4af37;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎮 Nattice Load Test</h1>
+  
+  <div class="controls">
+    <h3>Test Configuration</h3>
+    <input type="text" id="hostId" placeholder="Host Peer ID (TC_...)" style="width: 300px;">
+    <input type="text" id="roomCode" placeholder="Room Code (ABC123)" style="width: 150px;">
+    <br>
+    <input type="number" id="userCount" placeholder="Number of users" value="5" min="1" max="100">
+    <input type="number" id="delay" placeholder="Delay between joins (ms)" value="500" min="0" max="5000">
+    <br>
+    <button onclick="startTest()">Start Load Test</button>
+    <button onclick="clearLog()">Clear Log</button>
+    <button onclick="stopTest()">Stop Test</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat-box">
+      <div class="stat-value" id="totalUsers">0</div>
+      <div>Total Users</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="connectedUsers">0</div>
+      <div>Connected</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="failedUsers">0</div>
+      <div>Failed</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value" id="avgTime">0ms</div>
+      <div>Avg Join Time</div>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="crypto.js"></script>
+  <script>
+    let testRunning = false;
+    let connections = [];
+    let stats = {
+      total: 0,
+      connected: 0,
+      failed: 0,
+      times: []
+    };
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('log');
+      const time = new Date().toLocaleTimeString();
+      const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+      logEl.innerHTML += `<div class="${className}">[${time}] ${message}</div>`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalUsers').textContent = stats.total;
+      document.getElementById('connectedUsers').textContent = stats.connected;
+      document.getElementById('failedUsers').textContent = stats.failed;
+      const avgTime = stats.times.length > 0 
+        ? Math.round(stats.times.reduce((a, b) => a + b, 0) / stats.times.length)
+        : 0;
+      document.getElementById('avgTime').textContent = avgTime + 'ms';
+    }
+
+    function clearLog() {
+      document.getElementById('log').innerHTML = '';
+      stats = { total: 0, connected: 0, failed: 0, times: [] };
+      updateStats();
+    }
+
+    function stopTest() {
+      testRunning = false;
+      connections.forEach(conn => {
+        if (conn.peer) conn.peer.destroy();
+      });
+      connections = [];
+      log('Test stopped', 'info');
+    }
+
+    async function createTestUser(userId, hostPeerId, roomCode) {
+      const startTime = Date.now();
+      const userName = `TestUser${userId}`;
+      
+      return new Promise(async (resolve, reject) => {
+        try {
+          log(`Creating user ${userName}...`, 'info');
+          
+          const peerId = 'TC_TEST_' + Math.random().toString(36).substring(2, 14);
+          const peer = new Peer(peerId, {
+            config: {
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ]
+            }
+          });
+
+          peer.on('open', async (id) => {
+            log(`${userName} peer opened: ${id}`, 'info');
+            
+            // Derive room key
+            const salt = 'TrumpCall_' + roomCode;
+            const roomKey = await GameCrypto.deriveRoomKey(roomCode, salt);
+            
+            // Connect to host
+            const conn = peer.connect(hostPeerId, { reliable: true });
+            
+            conn.on('open', async () => {
+              log(`${userName} connected to host`, 'success');
+              
+              // Send join request
+              const joinMsg = {
+                type: 'JOIN_REQUEST',
+                name: userName,
+                playerId: 'PID_' + Math.random().toString(36).substring(2, 14),
+                peerId: id,
+              };
+              
+              const json = JSON.stringify(joinMsg);
+              const encrypted = await GameCrypto.encrypt(json, roomKey);
+              conn.send(encrypted);
+              
+              log(`${userName} sent join request`, 'info');
+            });
+
+            conn.on('data', async (data) => {
+              try {
+                const decrypted = await GameCrypto.decrypt(data, roomKey);
+                const msg = JSON.parse(decrypted);
+                
+                if (msg.type === 'SEAT_ASSIGNED') {
+                  const joinTime = Date.now() - startTime;
+                  stats.connected++;
+                  stats.times.push(joinTime);
+                  updateStats();
+                  log(`${userName} assigned to seat ${msg.seat} (${joinTime}ms)`, 'success');
+                  resolve({ userName, seat: msg.seat, joinTime });
+                } else if (msg.type === 'ERROR') {
+                  stats.failed++;
+                  updateStats();
+                  log(`${userName} error: ${msg.message}`, 'error');
+                  reject(new Error(msg.message));
+                }
+              } catch (e) {
+                log(`${userName} decrypt error: ${e.message}`, 'error');
+              }
+            });
+
+            conn.on('error', (err) => {
+              stats.failed++;
+              updateStats();
+              log(`${userName} connection error: ${err.message}`, 'error');
+              reject(err);
+            });
+
+            connections.push({ peer, conn, userName });
+          });
+
+          peer.on('error', (err) => {
+            stats.failed++;
+            updateStats();
+            log(`${userName} peer error: ${err.message}`, 'error');
+            reject(err);
+          });
+
+          setTimeout(() => {
+            if (!peer.open) {
+              stats.failed++;
+              updateStats();
+              reject(new Error('Peer initialization timeout'));
+            }
+          }, 10000);
+
+        } catch (err) {
+          stats.failed++;
+          updateStats();
+          log(`${userName} failed: ${err.message}`, 'error');
+          reject(err);
+        }
+      });
+    }
+
+    async function startTest() {
+      const hostId = document.getElementById('hostId').value.trim();
+      const roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+      const userCount = parseInt(document.getElementById('userCount').value);
+      const delay = parseInt(document.getElementById('delay').value);
+
+      if (!hostId || !roomCode) {
+        alert('Please enter Host ID and Room Code');
+        return;
+      }
+
+      if (userCount < 1 || userCount > 100) {
+        alert('User count must be between 1 and 100');
+        return;
+      }
+
+      testRunning = true;
+      clearLog();
+      log(`Starting load test: ${userCount} users joining room ${roomCode}`, 'info');
+      log(`Host ID: ${hostId}`, 'info');
+      log(`Delay between joins: ${delay}ms`, 'info');
+
+      stats.total = userCount;
+      updateStats();
+
+      for (let i = 1; i <= userCount && testRunning; i++) {
+        createTestUser(i, hostId, roomCode).catch(err => {
+          log(`User ${i} failed: ${err.message}`, 'error');
+        });
+        
+        if (i < userCount) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      log('All users initiated', 'info');
+    }
+  </script>
+</body>
+</html>

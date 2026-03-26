@@ -265,6 +265,7 @@ const Game = (() => {
   function handleClientMessage(fromPeer, msg) {
     switch (msg.type) {
       case 'SEAT_ASSIGNED':
+        console.log('[Client] Received SEAT_ASSIGNED, seat:', msg.seat);
         mySeat = msg.seat;
         state = msg.state;
         // Restore passedPlayers as a Set (serialized as array)
@@ -277,6 +278,7 @@ const Game = (() => {
             seatToPeer.set(Number(seat), peerId);
           }
         }
+        console.log('[Client] Updating lobby UI, mySeat:', mySeat);
         UI.updateLobby(state, mySeat);
         UI.showToast(`Seated at position ${msg.seat + 1} (Team ${Engine.getTeam(msg.seat)})`);
         break;
@@ -345,6 +347,8 @@ const Game = (() => {
   }
 
   function handleJoinRequest(fromPeer, msg) {
+    console.log('[Host] Join request from:', msg.name, 'peerId:', fromPeer);
+    
     // Find next available seat
     let seat = -1;
     for (let i = 0; i < 6; i++) {
@@ -355,10 +359,13 @@ const Game = (() => {
     }
 
     if (seat === -1) {
+      console.log('[Host] Game is full, rejecting join');
       Network.sendTo(fromPeer, { type: 'ERROR', message: 'Game is full' });
       return;
     }
 
+    console.log('[Host] Assigning seat', seat, 'to', msg.name);
+    
     state.players[seat] = {
       id: msg.playerId,
       name: msg.name,
@@ -372,6 +379,8 @@ const Game = (() => {
     // Send seat assignment — include seatToPeer so client knows how to reach host
     const seatToPeerObj = {};
     for (const [s, p] of seatToPeer) seatToPeerObj[s] = p;
+    
+    console.log('[Host] Sending SEAT_ASSIGNED to', fromPeer, 'seat:', seat);
     Network.sendTo(fromPeer, {
       type: 'SEAT_ASSIGNED',
       seat,
