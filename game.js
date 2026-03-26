@@ -854,7 +854,19 @@ const Game = (() => {
     const player = state.players[currentSeat];
     if (!player || !player.isAI) return;
 
-    const delay = isSoloMode ? 500 + Math.random() * 400 : 800 + Math.random() * 600;
+    // Different delays for different phases
+    let delay;
+    if (state.phase === 'PLAYING') {
+      // 20 seconds for card play
+      delay = 20000;
+    } else if (state.phase === 'BIDDING' || state.phase === 'TRUMP_SELECT') {
+      // Faster for bidding/trump selection
+      delay = isSoloMode ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
+    } else {
+      // Default for other phases
+      delay = isSoloMode ? 500 + Math.random() * 400 : 800 + Math.random() * 600;
+    }
+
     setTimeout(() => {
       if (state.phase === 'BIDDING') {
         aiMakeBid(currentSeat);
