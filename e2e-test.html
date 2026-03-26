@@ -202,8 +202,9 @@
     <div class="control-group">
       <label>Test Mode:</label>
       <select id="testMode">
-        <option value="full">Full Game (9 rounds)</option>
+        <option value="debug">Debug Mode (2 games)</option>
         <option value="quick" selected>Quick Test (1 round)</option>
+        <option value="full">Full Game (9 rounds)</option>
         <option value="stress">Stress Test (rapid joins)</option>
       </select>
     </div>
@@ -345,29 +346,59 @@
         this.connected = false;
       }
 
-      async init() {
+      async init(retryCount = 0) {
         return new Promise((resolve, reject) => {
           const peerId = 'TC_BOT_' + Math.random().toString(36).substring(2, 14);
+          log(`${this.playerName} initializing peer (attempt ${retryCount + 1})`, 'info');
+          
           this.peer = new Peer(peerId, {
             config: {
               iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-              ]
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+              ],
+              debug: 2 // Enable debug logging
             }
           });
 
+          let resolved = false;
+          
           this.peer.on('open', (id) => {
+            if (resolved) return;
+            resolved = true;
             this.peerId = id;
+            log(`${this.playerName} peer initialized: ${id}`, 'success');
             resolve(id);
           });
 
           this.peer.on('error', (err) => {
+            if (resolved) return;
+            resolved = true;
             log(`${this.playerName} peer error: ${err.message}`, 'error');
-            reject(err);
+            
+            // Retry on connection errors
+            if (retryCount < 2 && (err.type === 'network' || err.type === 'server-error')) {
+              setTimeout(() => {
+                this.init(retryCount + 1).then(resolve).catch(reject);
+              }, 2000 * (retryCount + 1));
+            } else {
+              reject(err);
+            }
           });
 
-          setTimeout(() => reject(new Error('Peer init timeout')), 10000);
+          this.peer.on('disconnected', () => {
+            log(`${this.playerName} peer disconnected`, 'warning');
+          });
+
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              log(`${this.playerName} peer init timeout`, 'error');
+              reject(new Error('Peer init timeout'));
+            }
+          }, 30000);
         });
       }
 
@@ -629,10 +660,17 @@
     }
 
     async function startE2ETest() {
-      const totalUsers = parseInt(document.getElementById('totalUsers').value);
-      const concurrentGames = parseInt(document.getElementById('concurrentGames').value);
+      let totalUsers = parseInt(document.getElementById('totalUsers').value);
+      let concurrentGames = parseInt(document.getElementById('concurrentGames').value);
       const gameSpeed = document.getElementById('gameSpeed').value;
       const testMode = document.getElementById('testMode').value;
+
+      // Debug mode overrides
+      if (testMode === 'debug') {
+        totalUsers = 12; // 2 games
+        concurrentGames = 2;
+        log('Debug Mode: Testing with 2 games (12 users)', 'info');
+      }
 
       if (totalUsers % 6 !== 0) {
         alert('Total users must be a multiple of 6 (6 players per game)');
