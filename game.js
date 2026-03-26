@@ -915,8 +915,8 @@ const Game = (() => {
     // Different delays for different phases
     let delay;
     if (state.phase === 'PLAYING') {
-      // 20 seconds for card play
-      delay = 20000;
+      // 7 seconds for card play
+      delay = 7000;
     } else if (state.phase === 'BIDDING' || state.phase === 'TRUMP_SELECT') {
       // Faster for bidding/trump selection
       delay = isSoloMode ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
