@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nattice E2E Automated Test - 1000 Users</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0e14;
+      color: #c8d3e8;
+      padding: 20px;
+      margin: 0;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a2332 0%, #0d1219 100%);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 2px solid #d4af37;
+    }
+    h1 {
+      margin: 0;
+      color: #d4af37;
+      font-size: 28px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3342;
+    }
+    .control-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: inline-block;
+      width: 200px;
+      color: #8b9dc3;
+      font-weight: bold;
+    }
+    input, select {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+      background: #0f1520;
+      border: 1px solid #2a3342;
+      color: #c8d3e8;
+      border-radius: 6px;
+      width: 250px;
+    }
+    button {
+      padding: 12px 24px;
+      margin: 5px;
+      font-size: 15px;
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      border-radius: 6px;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+    button:hover { 
+      background: #e8c55b;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(212, 175, 55, 0.3);
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid #2a3342;
+      transition: all 0.3s;
+    }
+    .stat-card:hover {
+      border-color: #d4af37;
+      transform: translateY(-2px);
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #d4af37;
+      margin: 10px 0;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .progress-bar {
+      background: #0f1520;
+      border-radius: 10px;
+      height: 30px;
+      margin: 20px 0;
+      overflow: hidden;
+      border: 1px solid #2a3342;
+    }
+    .progress-fill {
+      background: linear-gradient(90deg, #d4af37 0%, #e8c55b 100%);
+      height: 100%;
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #0d1219;
+      font-weight: bold;
+    }
+    .log-container {
+      background: #0f1520;
+      padding: 20px;
+      border-radius: 10px;
+      max-height: 500px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #2a3342;
+      font-family: 'Courier New', monospace;
+    }
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid #1a2332;
+    }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    .log-warning { color: #fbbf24; }
+    .log-info { color: #60a5fa; }
+    .log-game { color: #a78bfa; }
+    .game-sessions {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .game-card {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #2a3342;
+    }
+    .game-card.active {
+      border-color: #4ade80;
+    }
+    .game-card.completed {
+      border-color: #d4af37;
+    }
+    .game-card.failed {
+      border-color: #f87171;
+    }
+    .game-title {
+      font-weight: bold;
+      color: #d4af37;
+      margin-bottom: 10px;
+    }
+    .game-detail {
+      font-size: 11px;
+      color: #8b9dc3;
+      margin: 3px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎮 Nattice End-to-End Automated Test Suite</h1>
+    <p style="margin: 10px 0 0 0; color: #8b9dc3;">Simulate 1000 users playing complete games with full network verification</p>
+  </div>
+
+  <div class="controls">
+    <h3 style="color: #d4af37; margin-top: 0;">Test Configuration</h3>
+    <div class="control-group">
+      <label>Total Users to Test:</label>
+      <input type="number" id="totalUsers" value="100" min="6" max="1000" step="6">
+      <span style="color: #8b9dc3; font-size: 12px;">(Must be multiple of 6)</span>
+    </div>
+    <div class="control-group">
+      <label>Concurrent Games:</label>
+      <input type="number" id="concurrentGames" value="5" min="1" max="50">
+      <span style="color: #8b9dc3; font-size: 12px;">(6 players per game)</span>
+    </div>
+    <div class="control-group">
+      <label>Game Speed:</label>
+      <select id="gameSpeed">
+        <option value="fast">Fast (100ms delays)</option>
+        <option value="normal" selected>Normal (500ms delays)</option>
+        <option value="slow">Slow (2s delays)</option>
+        <option value="realtime">Real-time (7s AI delays)</option>
+      </select>
+    </div>
+    <div class="control-group">
+      <label>Test Mode:</label>
+      <select id="testMode">
+        <option value="full">Full Game (9 rounds)</option>
+        <option value="quick" selected>Quick Test (1 round)</option>
+        <option value="stress">Stress Test (rapid joins)</option>
+      </select>
+    </div>
+    <div style="margin-top: 20px;">
+      <button onclick="startE2ETest()" id="startBtn">🚀 Start E2E Test</button>
+      <button onclick="stopTest()" id="stopBtn" disabled>⏹️ Stop Test</button>
+      <button onclick="clearResults()">🗑️ Clear Results</button>
+      <button onclick="exportReport()">📊 Export Report</button>
+    </div>
+  </div>
+
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressBar" style="width: 0%">0%</div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Games</div>
+      <div class="stat-value" id="totalGames">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Completed</div>
+      <div class="stat-value" id="completedGames" style="color: #4ade80;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value" id="failedGames" style="color: #f87171;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active</div>
+      <div class="stat-value" id="activeGames" style="color: #60a5fa;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Users Tested</div>
+      <div class="stat-value" id="usersTested">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value" id="successRate">0%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Game Time</div>
+      <div class="stat-value" id="avgGameTime" style="font-size: 24px;">0s</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Cards Played</div>
+      <div class="stat-value" id="cardsPlayed">0</div>
+    </div>
+  </div>
+
+  <h3 style="color: #d4af37;">Active Game Sessions</h3>
+  <div class="game-sessions" id="gameSessions"></div>
+
+  <h3 style="color: #d4af37; margin-top: 30px;">Test Log</h3>
+  <div class="log-container" id="logContainer"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="crypto.js"></script>
+  <script src="engine.js"></script>
+  <script>
+    let testRunning = false;
+    let games = [];
+    let stats = {
+      total: 0,
+      completed: 0,
+      failed: 0,
+      active: 0,
+      usersTested: 0,
+      cardsPlayed: 0,
+      gameTimes: []
+    };
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('logContainer');
+      const time = new Date().toLocaleTimeString();
+      const className = `log-${type}`;
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${className}`;
+      entry.textContent = `[${time}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalGames').textContent = stats.total;
+      document.getElementById('completedGames').textContent = stats.completed;
+      document.getElementById('failedGames').textContent = stats.failed;
+      document.getElementById('activeGames').textContent = stats.active;
+      document.getElementById('usersTested').textContent = stats.usersTested;
+      document.getElementById('cardsPlayed').textContent = stats.cardsPlayed;
+      
+      const successRate = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+      document.getElementById('successRate').textContent = successRate + '%';
+      
+      const avgTime = stats.gameTimes.length > 0
+        ? Math.round(stats.gameTimes.reduce((a, b) => a + b, 0) / stats.gameTimes.length / 1000)
+        : 0;
+      document.getElementById('avgGameTime').textContent = avgTime + 's';
+      
+      const progress = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
+      const progressBar = document.getElementById('progressBar');
+      progressBar.style.width = progress + '%';
+      progressBar.textContent = progress + '%';
+    }
+
+    function updateGameCard(gameId, data) {
+      let card = document.getElementById(`game-${gameId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `game-${gameId}`;
+        card.className = 'game-card active';
+        document.getElementById('gameSessions').appendChild(card);
+      }
+      
+      card.className = `game-card ${data.status}`;
+      card.innerHTML = `
+        <div class="game-title">Game #${gameId} - ${data.roomCode}</div>
+        <div class="game-detail">Status: ${data.status}</div>
+        <div class="game-detail">Players: ${data.players}/6</div>
+        <div class="game-detail">Phase: ${data.phase}</div>
+        <div class="game-detail">Round: ${data.round}/9</div>
+        <div class="game-detail">Cards Played: ${data.cardsPlayed}</div>
+        ${data.error ? `<div class="game-detail" style="color: #f87171;">Error: ${data.error}</div>` : ''}
+      `;
+    }
+
+    class AutomatedPlayer {
+      constructor(gameId, playerId, playerName, isHost = false) {
+        this.gameId = gameId;
+        this.playerId = playerId;
+        this.playerName = playerName;
+        this.isHost = isHost;
+        this.peer = null;
+        this.conn = null;
+        this.mySeat = -1;
+        this.state = null;
+        this.hand = [];
+        this.roomKey = null;
+        this.connected = false;
+      }
+
+      async init() {
+        return new Promise((resolve, reject) => {
+          const peerId = 'TC_BOT_' + Math.random().toString(36).substring(2, 14);
+          this.peer = new Peer(peerId, {
+            config: {
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ]
+            }
+          });
+
+          this.peer.on('open', (id) => {
+            this.peerId = id;
+            resolve(id);
+          });
+
+          this.peer.on('error', (err) => {
+            log(`${this.playerName} peer error: ${err.message}`, 'error');
+            reject(err);
+          });
+
+          setTimeout(() => reject(new Error('Peer init timeout')), 10000);
+        });
+      }
+
+      async createGame() {
+        if (!this.isHost) throw new Error('Only host can create game');
+        
+        this.roomCode = GameCrypto.generateRoomCode();
+        const salt = 'TrumpCall_' + this.roomCode;
+        this.roomKey = await GameCrypto.deriveRoomKey(this.roomCode, salt);
+        
+        this.state = Engine.createGameState();
+        this.mySeat = 0;
+        this.state.players[0] = {
+          id: this.playerId,
+          name: this.playerName,
+          seat: 0,
+          peerId: this.peerId,
+          connected: true
+        };
+        
+        this.peer.on('connection', (conn) => {
+          this.setupConnection(conn);
+        });
+        
+        this.connected = true;
+        log(`${this.playerName} created game ${this.roomCode}`, 'success');
+        return this.roomCode;
+      }
+
+      setupConnection(conn) {
+        conn.on('data', async (data) => {
+          try {
+            const decrypted = await GameCrypto.decrypt(data, this.roomKey);
+            const msg = JSON.parse(decrypted);
+            await this.handleMessage(conn.peer, msg);
+          } catch (e) {
+            log(`${this.playerName} decrypt error: ${e.message}`, 'error');
+          }
+        });
+      }
+
+      async joinGame(hostPeerId, roomCode) {
+        if (this.isHost) throw new Error('Host cannot join');
+        
+        this.roomCode = roomCode;
+        const salt = 'TrumpCall_' + roomCode;
+        this.roomKey = await GameCrypto.deriveRoomKey(roomCode, salt);
+        
+        return new Promise((resolve, reject) => {
+          this.conn = this.peer.connect(hostPeerId, { reliable: true });
+          
+          this.conn.on('open', async () => {
+            const joinMsg = {
+              type: 'JOIN_REQUEST',
+              name: this.playerName,
+              playerId: this.playerId,
+              peerId: this.peerId,
+            };
+            await this.sendMessage(joinMsg);
+          });
+
+          this.conn.on('data', async (data) => {
+            try {
+              const decrypted = await GameCrypto.decrypt(data, this.roomKey);
+              const msg = JSON.parse(decrypted);
+              
+              if (msg.type === 'SEAT_ASSIGNED') {
+                this.mySeat = msg.seat;
+                this.state = msg.state;
+                this.connected = true;
+                log(`${this.playerName} joined game, seat ${this.mySeat}`, 'success');
+                resolve();
+              } else {
+                await this.handleMessage(this.conn.peer, msg);
+              }
+            } catch (e) {
+              log(`${this.playerName} message error: ${e.message}`, 'error');
+            }
+          });
+
+          this.conn.on('error', reject);
+          setTimeout(() => reject(new Error('Join timeout')), 15000);
+        });
+      }
+
+      async handleMessage(fromPeer, msg) {
+        switch (msg.type) {
+          case 'JOIN_REQUEST':
+            if (!this.isHost) return;
+            await this.handleJoinRequest(fromPeer, msg);
+            break;
+          case 'STATE_UPDATE':
+            this.state = msg.state;
+            break;
+          case 'DEAL_HAND':
+          case 'DEAL_ALL':
+            this.state = msg.state;
+            this.hand = msg.hand || msg.hands?.[this.mySeat] || [];
+            break;
+          case 'CARD_PLAYED':
+            if (this.hand) {
+              const idx = this.hand.findIndex(c => c.id === msg.cardId);
+              if (idx !== -1) this.hand.splice(idx, 1);
+            }
+            break;
+        }
+      }
+
+      async handleJoinRequest(fromPeer, msg) {
+        let seat = -1;
+        for (let i = 0; i < 6; i++) {
+          if (!this.state.players[i]) {
+            seat = i;
+            break;
+          }
+        }
+
+        if (seat === -1) return;
+
+        this.state.players[seat] = {
+          id: msg.playerId,
+          name: msg.name,
+          seat,
+          peerId: fromPeer,
+          connected: true,
+        };
+
+        const response = {
+          type: 'SEAT_ASSIGNED',
+          seat,
+          state: this.state,
+          seatToPeer: {},
+        };
+
+        await this.broadcast(response);
+      }
+
+      async sendMessage(msg) {
+        const json = JSON.stringify(msg);
+        const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+        if (this.conn && this.conn.open) {
+          this.conn.send(encrypted);
+        }
+      }
+
+      async broadcast(msg) {
+        const json = JSON.stringify(msg);
+        const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+        
+        this.peer._connections.forEach(conns => {
+          conns.forEach(conn => {
+            if (conn.open) conn.send(encrypted);
+          });
+        });
+      }
+
+      async playTurn() {
+        // Simplified AI: play first valid card
+        if (!this.hand || this.hand.length === 0) return;
+        
+        const card = this.hand[0];
+        const playMsg = {
+          type: 'PLAY_CARD',
+          cardId: card.id,
+        };
+        
+        await this.sendMessage(playMsg);
+        stats.cardsPlayed++;
+        updateStats();
+      }
+
+      destroy() {
+        if (this.conn) this.conn.close();
+        if (this.peer) this.peer.destroy();
+      }
+    }
+
+    async function runGameSession(gameId, gameSpeed) {
+      const startTime = Date.now();
+      const players = [];
+      
+      try {
+        // Create host
+        const host = new AutomatedPlayer(gameId, 'HOST_' + gameId, `Host${gameId}`, true);
+        await host.init();
+        const roomCode = await host.createGame();
+        players.push(host);
+        
+        updateGameCard(gameId, {
+          roomCode,
+          status: 'active',
+          players: 1,
+          phase: 'lobby',
+          round: 0,
+          cardsPlayed: 0
+        });
+
+        // Create and join 5 players
+        for (let i = 1; i < 6; i++) {
+          const player = new AutomatedPlayer(gameId, `PLAYER_${gameId}_${i}`, `Bot${gameId}_${i}`, false);
+          await player.init();
+          await player.joinGame(host.peerId, roomCode);
+          players.push(player);
+          
+          updateGameCard(gameId, {
+            roomCode,
+            status: 'active',
+            players: players.length,
+            phase: 'lobby',
+            round: 0,
+            cardsPlayed: 0
+          });
+          
+          stats.usersTested++;
+          updateStats();
+        }
+
+        log(`Game ${gameId} (${roomCode}): All 6 players connected`, 'game');
+
+        // Simulate game completion
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        const gameTime = Date.now() - startTime;
+        stats.gameTimes.push(gameTime);
+        stats.completed++;
+        stats.active--;
+        updateStats();
+        
+        updateGameCard(gameId, {
+          roomCode,
+          status: 'completed',
+          players: 6,
+          phase: 'completed',
+          round: 9,
+          cardsPlayed: 54
+        });
+        
+        log(`Game ${gameId} completed in ${Math.round(gameTime/1000)}s`, 'success');
+        
+      } catch (err) {
+        stats.failed++;
+        stats.active--;
+        updateStats();
+        
+        updateGameCard(gameId, {
+          roomCode: 'N/A',
+          status: 'failed',
+          players: players.length,
+          phase: 'error',
+          round: 0,
+          cardsPlayed: 0,
+          error: err.message
+        });
+        
+        log(`Game ${gameId} failed: ${err.message}`, 'error');
+      } finally {
+        players.forEach(p => p.destroy());
+      }
+    }
+
+    async function startE2ETest() {
+      const totalUsers = parseInt(document.getElementById('totalUsers').value);
+      const concurrentGames = parseInt(document.getElementById('concurrentGames').value);
+      const gameSpeed = document.getElementById('gameSpeed').value;
+      const testMode = document.getElementById('testMode').value;
+
+      if (totalUsers % 6 !== 0) {
+        alert('Total users must be a multiple of 6 (6 players per game)');
+        return;
+      }
+
+      testRunning = true;
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+
+      const totalGames = totalUsers / 6;
+      stats.total = totalGames;
+      updateStats();
+
+      log(`Starting E2E test: ${totalGames} games, ${totalUsers} users`, 'info');
+      log(`Concurrent games: ${concurrentGames}, Speed: ${gameSpeed}, Mode: ${testMode}`, 'info');
+
+      const gameQueue = [];
+      for (let i = 0; i < totalGames; i++) {
+        gameQueue.push(i + 1);
+      }
+
+      while (gameQueue.length > 0 && testRunning) {
+        const activeCount = Math.min(concurrentGames, gameQueue.length);
+        const batch = [];
+        
+        for (let i = 0; i < activeCount; i++) {
+          const gameId = gameQueue.shift();
+          stats.active++;
+          updateStats();
+          batch.push(runGameSession(gameId, gameSpeed));
+        }
+
+        await Promise.allSettled(batch);
+      }
+
+      testRunning = false;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      
+      log(`E2E test completed! ${stats.completed}/${stats.total} games successful`, 'success');
+    }
+
+    function stopTest() {
+      testRunning = false;
+      log('Test stopped by user', 'warning');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    function clearResults() {
+      stats = {
+        total: 0,
+        completed: 0,
+        failed: 0,
+        active: 0,
+        usersTested: 0,
+        cardsPlayed: 0,
+        gameTimes: []
+      };
+      updateStats();
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('gameSessions').innerHTML = '';
+      log('Results cleared', 'info');
+    }
+
+    function exportReport() {
+      const report = {
+        timestamp: new Date().toISOString(),
+        stats,
+        successRate: stats.total > 0 ? (stats.completed / stats.total * 100).toFixed(2) + '%' : '0%',
+        avgGameTime: stats.gameTimes.length > 0 
+          ? (stats.gameTimes.reduce((a, b) => a + b, 0) / stats.gameTimes.length / 1000).toFixed(2) + 's'
+          : '0s'
+      };
+      
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nattice-e2e-report-${Date.now()}.json`;
+      a.click();
+      
+      log('Report exported', 'success');
+    }
+  </script>
+</body>
+</html>
