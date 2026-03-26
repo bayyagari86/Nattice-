@@ -89,15 +89,30 @@ const UI = (() => {
         // Generate QR code with web URL for easy joining
         const qrContainer = document.getElementById('qr-code-container');
         const qrEl = document.getElementById('qr-code');
-        if (typeof QRCode !== 'undefined' && hostId) {
-          qrEl.innerHTML = '';
+        const qrUrlEl = document.getElementById('qr-join-url');
+        if (hostId) {
           const joinUrl = `${window.location.origin}${window.location.pathname}?host=${hostId}&room=${roomCode}`;
-          new QRCode(qrEl, {
-            text: joinUrl,
-            width: 140, height: 140,
-            colorDark: '#0d1219', colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.M,
-          });
+          
+          // Display clickable URL text
+          if (qrUrlEl) {
+            qrUrlEl.innerHTML = `<a href="${joinUrl}" target="_blank" style="color:#6c8ebf;text-decoration:underline">${joinUrl}</a>`;
+          }
+          
+          // Generate QR code if library loaded
+          if (typeof QRCode !== 'undefined') {
+            try {
+              qrEl.innerHTML = '';
+              new QRCode(qrEl, {
+                text: joinUrl,
+                width: 140, height: 140,
+                colorDark: '#0d1219', colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.H,
+              });
+            } catch (e) {
+              console.error('QR generation failed:', e);
+              qrEl.innerHTML = '<div style="padding:20px;color:#999">QR code unavailable</div>';
+            }
+          }
           qrContainer.style.display = 'flex';
         }
       }).catch(err => {
