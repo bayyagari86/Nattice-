@@ -15,18 +15,84 @@ const UI = (() => {
 
   let badgePopupTimeout = null;
 
+  function simulateGameplay(mode) {
+    if (!Game || !Game.state) return;
+    
+    console.log(`Simulating gameplay mode: ${mode}`);
+    
+    // Simple automated gameplay
+    const gameplayInterval = setInterval(() => {
+      if (!Game.state || Game.state.phase === 'LOBBY') {
+        // Wait for game to start
+        return;
+      }
+      
+      if (Game.state.phase === 'PLAYING' && Game.state.currentRound.currentPlayer === Game.mySeat) {
+        // Auto-play first available card
+        const hand = Game.state.hands[Game.mySeat] || [];
+        if (hand.length > 0) {
+          const card = hand[0];
+          Game.playCard(card.id);
+          console.log(`Auto-played card: ${card.rank}${card.suit}`);
+        }
+      }
+      
+      // Stop simulation after certain conditions
+      if (mode === 'play' && Game.state.currentRound.tricksPlayed >= 3) {
+        clearInterval(gameplayInterval);
+        console.log('Gameplay simulation completed (play mode)');
+      } else if (mode === 'full' && Game.state.phase === 'GAME_OVER') {
+        clearInterval(gameplayInterval);
+        console.log('Gameplay simulation completed (full mode)');
+      }
+    }, 3000);
+  }
+
   function init() {
+    // Track console errors for automation
+    if (!window.consoleErrors) {
+      window.consoleErrors = [];
+      const originalError = console.error;
+      console.error = function(...args) {
+        window.consoleErrors.push(args.join(' '));
+        originalError.apply(console, args);
+      };
+    }
+
     // Check for QR code join params in URL
     const urlParams = new URLSearchParams(window.location.search);
     const qrHost = urlParams.get('host');
     const qrRoom = urlParams.get('room');
+    const auto = urlParams.get('auto');
+    const userName = urlParams.get('user');
+    const mode = urlParams.get('mode');
+    
     if (qrHost && qrRoom) {
-      // Show immediate feedback
-      showToast(`Auto-joining room ${qrRoom}...`);
-      // Auto-trigger join dialog with pre-filled values after DOM is ready
-      setTimeout(() => {
-        showJoinDialog(qrHost, qrRoom);
-      }, 800);
+      // Auto-join for browser automation
+      if (auto === 'true' && userName) {
+        showToast(`Auto-joining as ${userName}...`);
+        setTimeout(() => {
+          Game.joinGame(userName.trim(), qrHost.trim(), qrRoom.trim().toUpperCase())
+            .then(() => {
+              // Store result for automation to read
+              window.autoJoinResult = { success: true, user: userName };
+              if (mode === 'play' || mode === 'full') {
+                // Simulate playing cards after joining
+                setTimeout(() => simulateGameplay(mode), 2000);
+              }
+            })
+            .catch(err => {
+              window.autoJoinResult = { success: false, error: err.message };
+              console.error('Auto-join failed:', err);
+            });
+        }, 800);
+      } else {
+        // Regular QR code join
+        showToast(`Auto-joining room ${qrRoom}...`);
+        setTimeout(() => {
+          showJoinDialog(qrHost, qrRoom);
+        }, 800);
+      }
     }
 
     document.getElementById('solo-btn').addEventListener('click', startSoloGame);

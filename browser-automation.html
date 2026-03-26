@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Automation Test - 60 Real Users</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0e14;
+      color: #c8d3e8;
+      padding: 20px;
+      margin: 0;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a2332 0%, #0d1219 100%);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 2px solid #d4af37;
+    }
+    h1 {
+      margin: 0;
+      color: #d4af37;
+      font-size: 28px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3342;
+    }
+    input, button, select {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+      background: #0f1520;
+      border: 1px solid #2a3342;
+      color: #c8d3e8;
+      border-radius: 6px;
+    }
+    button {
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover { background: #e8c55b; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid #2a3342;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #d4af37;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+    }
+    .log {
+      background: #0f1520;
+      padding: 15px;
+      border-radius: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #2a3342;
+      font-family: 'Courier New', monospace;
+    }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    .log-info { color: #60a5fa; }
+    .log-warning { color: #fbbf24; }
+    .window-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .window-card {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #2a3342;
+      text-align: center;
+    }
+    .window-card.open { border-color: #4ade80; }
+    .window-card.closed { border-color: #f87171; }
+    .window-card.joining { border-color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎮 Browser Automation Test - 60 Real Users</h1>
+    <p style="margin: 10px 0 0 0; color: #8b9dc3;">Opens real browser windows to simulate users joining your game</p>
+  </div>
+
+  <div class="controls">
+    <h3 style="color: #d4af37; margin-top: 0;">Test Configuration</h3>
+    
+    <div style="margin-bottom: 15px;">
+      <label style="display: block; margin-bottom: 5px;">Number of Users:</label>
+      <input type="number" id="userCount" value="10" min="1" max="60" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Opens this many browser windows)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: block; margin-bottom: 5px;">Join Delay (ms):</label>
+      <input type="number" id="joinDelay" value="2000" min="500" max="10000" step="500" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Delay between window opens)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: block; margin-bottom: 5px;">Window Type:</label>
+      <select id="windowType">
+        <option value="popup">Popup Windows</option>
+        <option value="tab">New Tabs</option>
+      </select>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: block; margin-bottom: 5px;">Test Mode:</label>
+      <select id="testMode">
+        <option value="join">Just Join (test seat assignment)</option>
+        <option value="play">Join + Play Cards (test card clearing)</option>
+        <option value="full">Full Game (test everything)</option>
+      </select>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <button onclick="startBrowserTest()" id="startBtn">🚀 Start Browser Test</button>
+      <button onclick="stopTest()" id="stopBtn" disabled>⏹️ Stop Test</button>
+      <button onclick="closeAllWindows()">🗑️ Close All Windows</button>
+      <button onclick="clearResults()">📋 Clear Results</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Windows</div>
+      <div class="stat-value" id="totalWindows">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Open</div>
+      <div class="stat-value" id="openWindows" style="color: #4ade80;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Joined</div>
+      <div class="stat-value" id="joinedWindows" style="color: #60a5fa;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value" id="failedWindows" style="color: #f87171;">0</div>
+    </div>
+  </div>
+
+  <h3 style="color: #d4af37;">Browser Windows</h3>
+  <div class="window-grid" id="windowGrid"></div>
+
+  <h3 style="color: #d4af37; margin-top: 30px;">Test Log</h3>
+  <div class="log" id="logContainer"></div>
+
+  <script>
+    let testRunning = false;
+    let windows = [];
+    let stats = {
+      total: 0,
+      open: 0,
+      joined: 0,
+      failed: 0
+    };
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('logContainer');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-${type}`;
+      entry.textContent = `[${time}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalWindows').textContent = stats.total;
+      document.getElementById('openWindows').textContent = stats.open;
+      document.getElementById('joinedWindows').textContent = stats.joined;
+      document.getElementById('failedWindows').textContent = stats.failed;
+    }
+
+    function updateWindowCard(windowId, data) {
+      let card = document.getElementById(`window-${windowId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `window-${windowId}`;
+        card.className = 'window-card';
+        document.getElementById('windowGrid').appendChild(card);
+      }
+      
+      card.className = `window-card ${data.status}`;
+      card.innerHTML = `
+        <div style="font-weight: bold; color: #d4af37;">Window ${windowId}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">User: ${data.user || 'N/A'}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">Status: ${data.status}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">Seat: ${data.seat || 'N/A'}</div>
+        ${data.error ? `<div style="font-size: 10px; color: #f87171;">${data.error}</div>` : ''}
+      `;
+    }
+
+    async function openTestWindow(windowId, hostId, roomCode, testMode) {
+      const userName = `AutoUser${windowId}`;
+      const startTime = Date.now();
+      
+      try {
+        log(`Opening window ${windowId} for user ${userName}`, 'info');
+        updateWindowCard(windowId, { status: 'joining', user: userName });
+
+        // Create new window
+        const windowUrl = `http://localhost:3000?host=${hostId}&room=${roomCode}&auto=true&user=${userName}&mode=${testMode}`;
+        
+        let newWindow;
+        if (document.getElementById('windowType').value === 'popup') {
+          const width = 400;
+          const height = 600;
+          const left = 100 + (windowId % 5) * 450;
+          const top = 100 + Math.floor(windowId / 5) * 650;
+          newWindow = window.open(windowUrl, `user${windowId}`, 
+            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`);
+        } else {
+          newWindow = window.open(windowUrl, `_blank`);
+        }
+
+        if (!newWindow) {
+          throw new Error('Popup blocked - please allow popups');
+        }
+
+        windows.push({ id: windowId, window: newWindow, userName });
+        stats.open++;
+        stats.total++;
+        updateStats();
+        updateWindowCard(windowId, { status: 'open', user: userName });
+
+        // Wait for window to load and join
+        const joinResult = await new Promise((resolve, reject) => {
+          const checkInterval = setInterval(() => {
+            try {
+              if (newWindow.closed) {
+                clearInterval(checkInterval);
+                reject(new Error('Window closed by user'));
+                return;
+              }
+
+              // Check if window has joined successfully
+              const result = newWindow.autoJoinResult;
+              if (result) {
+                clearInterval(checkInterval);
+                if (result.success) {
+                  resolve(result);
+                } else {
+                  reject(new Error(result.error || 'Join failed'));
+                }
+              }
+
+              // Check for console errors
+              const consoleErrors = newWindow.consoleErrors || [];
+              if (consoleErrors.length > 0) {
+                const lastError = consoleErrors[consoleErrors.length - 1];
+                if (lastError.includes('SEAT_ASSIGNED')) {
+                  // This might be a good sign - continue waiting
+                } else if (lastError.includes('timeout') || lastError.includes('failed')) {
+                  clearInterval(checkInterval);
+                  reject(new Error(lastError));
+                }
+              }
+
+            } catch (e) {
+              clearInterval(checkInterval);
+              reject(e);
+            }
+          }, 1000);
+
+          // Timeout after 30 seconds
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error('Join timeout'));
+          }, 30000);
+        });
+
+        const joinTime = Date.now() - startTime;
+        stats.joined++;
+        updateStats();
+        
+        log(`Window ${windowId} joined successfully - Seat ${joinResult.seat} (${joinTime}ms)`, 'success');
+        updateWindowCard(windowId, { 
+          status: 'joined', 
+          user: userName, 
+          seat: joinResult.seat 
+        });
+
+        return joinResult;
+
+      } catch (err) {
+        stats.failed++;
+        updateStats();
+        
+        log(`Window ${windowId} failed: ${err.message}`, 'error');
+        updateWindowCard(windowId, { 
+          status: 'failed', 
+          user: userName, 
+          error: err.message 
+        });
+        throw err;
+      }
+    }
+
+    async function startBrowserTest() {
+      const userCount = parseInt(document.getElementById('userCount').value);
+      const joinDelay = parseInt(document.getElementById('joinDelay').value);
+      const testMode = document.getElementById('testMode').value;
+
+      // Get host info from URL parameters or prompt
+      const urlParams = new URLSearchParams(window.location.search);
+      let hostId = urlParams.get('host');
+      let roomCode = urlParams.get('room');
+
+      if (!hostId || !roomCode) {
+        hostId = prompt('Enter Host Peer ID (TC_...):');
+        roomCode = prompt('Enter Room Code (ABC123):');
+        
+        if (!hostId || !roomCode) {
+          alert('Host ID and Room Code required');
+          return;
+        }
+      }
+
+      testRunning = true;
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+
+      log(`Starting browser test: ${userCount} users`, 'info');
+      log(`Host ID: ${hostId}, Room Code: ${roomCode}`, 'info');
+      log(`Test Mode: ${testMode}, Delay: ${joinDelay}ms`, 'info');
+
+      for (let i = 1; i <= userCount && testRunning; i++) {
+        try {
+          await openTestWindow(i, hostId, roomCode, testMode);
+        } catch (err) {
+          log(`Failed to open window ${i}: ${err.message}`, 'error');
+        }
+        
+        if (i < userCount && testRunning) {
+          await new Promise(resolve => setTimeout(resolve, joinDelay));
+        }
+      }
+
+      testRunning = false;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = false;
+      
+      log(`Browser test completed! ${stats.joined}/${stats.total} users joined`, 'info');
+    }
+
+    function stopTest() {
+      testRunning = false;
+      log('Test stopped by user', 'warning');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    function closeAllWindows() {
+      windows.forEach(({ window, id }) => {
+        try {
+          if (!window.closed) {
+            window.close();
+            updateWindowCard(id, { status: 'closed' });
+          }
+        } catch (e) {
+          log(`Failed to close window ${id}: ${e.message}`, 'error');
+        }
+      });
+      windows = [];
+      stats.open = 0;
+      updateStats();
+      log('All windows closed', 'info');
+    }
+
+    function clearResults() {
+      windows = [];
+      stats = { total: 0, open: 0, joined: 0, failed: 0 };
+      updateStats();
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('windowGrid').innerHTML = '';
+      log('Results cleared', 'info');
+    }
+
+    // Handle window close events
+    window.addEventListener('beforeunload', () => {
+      closeAllWindows();
+    });
+  </script>
+</body>
+</html>

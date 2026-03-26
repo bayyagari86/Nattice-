@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Realistic Network Test - Join Your Game</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0e14;
+      color: #c8d3e8;
+      padding: 20px;
+      margin: 0;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a2332 0%, #0d1219 100%);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 2px solid #d4af37;
+    }
+    h1 {
+      margin: 0;
+      color: #d4af37;
+      font-size: 28px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3342;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+      background: #0f1520;
+      border: 1px solid #2a3342;
+      color: #c8d3e8;
+      border-radius: 6px;
+    }
+    button {
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover { background: #e8c55b; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid #2a3342;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #d4af37;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+    }
+    .log {
+      background: #0f1520;
+      padding: 15px;
+      border-radius: 10px;
+      max-height: 500px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #2a3342;
+      font-family: 'Courier New', monospace;
+    }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    .log-info { color: #60a5fa; }
+    .log-warning { color: #fbbf24; }
+    .user-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .user-card {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #2a3342;
+    }
+    .user-card.connected { border-color: #4ade80; }
+    .user-card.failed { border-color: #f87171; }
+    .user-card.joining { border-color: #fbbf24; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎮 Realistic Network Test</h1>
+    <p style="margin: 10px 0 0 0; color: #8b9dc3;">Test real users joining your hosted game</p>
+  </div>
+
+  <div class="controls">
+    <h3 style="color: #d4af37; margin-top: 0;">Step 1: Host a Game</h3>
+    <p style="color: #8b9dc3; font-size: 12px;">Open <a href="http://localhost:3000" target="_blank" style="color: #d4af37;">http://localhost:3000</a> in another tab and host a game</p>
+    
+    <h3 style="color: #d4af37;">Step 2: Enter Game Details</h3>
+    <input type="text" id="hostId" placeholder="Host Peer ID (TC_...)" style="width: 300px;">
+    <input type="text" id="roomCode" placeholder="Room Code (ABC123)" style="width: 150px;">
+    
+    <h3 style="color: #d4af37;">Step 3: Configure Test</h3>
+    <input type="number" id="userCount" value="5" min="1" max="5" placeholder="Number of users">
+    <input type="number" id="delay" value="1000" min="0" max="5000" placeholder="Delay between joins (ms)">
+    
+    <div style="margin-top: 20px;">
+      <button onclick="startRealisticTest()">🚀 Start Realistic Test</button>
+      <button onclick="stopTest()">⏹️ Stop Test</button>
+      <button onclick="clearResults()">🗑️ Clear Results</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Users</div>
+      <div class="stat-value" id="totalUsers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Connected</div>
+      <div class="stat-value" id="connectedUsers" style="color: #4ade80;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value" id="failedUsers" style="color: #f87171;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value" id="successRate">0%</div>
+    </div>
+  </div>
+
+  <h3 style="color: #d4af37;">Test Users</h3>
+  <div class="user-list" id="userList"></div>
+
+  <h3 style="color: #d4af37; margin-top: 30px;">Test Log</h3>
+  <div class="log" id="logContainer"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="crypto.js"></script>
+  <script>
+    let testRunning = false;
+    let users = [];
+    let stats = {
+      total: 0,
+      connected: 0,
+      failed: 0
+    };
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('logContainer');
+      const time = new Date().toLocaleTimeString();
+      const className = `log-${type}`;
+      const entry = document.createElement('div');
+      entry.className = className;
+      entry.textContent = `[${time}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalUsers').textContent = stats.total;
+      document.getElementById('connectedUsers').textContent = stats.connected;
+      document.getElementById('failedUsers').textContent = stats.failed;
+      
+      const successRate = stats.total > 0 ? Math.round((stats.connected / stats.total) * 100) : 0;
+      document.getElementById('successRate').textContent = successRate + '%';
+    }
+
+    function updateUserCard(userId, data) {
+      let card = document.getElementById(`user-${userId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `user-${userId}`;
+        card.className = 'user-card';
+        document.getElementById('userList').appendChild(card);
+      }
+      
+      card.className = `user-card ${data.status}`;
+      card.innerHTML = `
+        <div style="font-weight: bold; color: #d4af37;">${data.name}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">Status: ${data.status}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">Seat: ${data.seat || 'N/A'}</div>
+        <div style="font-size: 11px; color: #8b9dc3;">Time: ${data.time || 'N/A'}</div>
+        ${data.error ? `<div style="font-size: 11px; color: #f87171;">Error: ${data.error}</div>` : ''}
+      `;
+    }
+
+    class TestUser {
+      constructor(userId, userName, hostPeerId, roomCode) {
+        this.userId = userId;
+        this.userName = userName;
+        this.hostPeerId = hostPeerId;
+        this.roomCode = roomCode;
+        this.peer = null;
+        this.conn = null;
+        this.startTime = Date.now();
+        this.seat = -1;
+      }
+
+      async join() {
+        const startTime = Date.now();
+        
+        try {
+          log(`${this.userName} starting join process...`, 'info');
+          updateUserCard(this.userId, { name: this.userName, status: 'joining' });
+
+          // Initialize PeerJS
+          const peerId = 'TC_TEST_' + Math.random().toString(36).substring(2, 14);
+          
+          this.peer = new Peer(peerId, {
+            config: {
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ]
+            }
+          });
+
+          await new Promise((resolve, reject) => {
+            this.peer.on('open', resolve);
+            this.peer.on('error', reject);
+            setTimeout(() => reject(new Error('Peer init timeout')), 15000);
+          });
+
+          log(`${this.userName} peer initialized: ${peerId}`, 'success');
+
+          // Connect to host
+          this.conn = this.peer.connect(this.hostPeerId, { reliable: true });
+
+          await new Promise((resolve, reject) => {
+            this.conn.on('open', resolve);
+            this.conn.on('error', reject);
+            setTimeout(() => reject(new Error('Connection timeout')), 10000);
+          });
+
+          log(`${this.userName} connected to host`, 'success');
+
+          // Derive room key
+          const salt = 'TrumpCall_' + this.roomCode;
+          const roomKey = await GameCrypto.deriveRoomKey(this.roomCode, salt);
+
+          // Send join request
+          const joinMsg = {
+            type: 'JOIN_REQUEST',
+            name: this.userName,
+            playerId: 'PID_' + Math.random().toString(36).substring(2, 14),
+            peerId: peerId,
+          };
+
+          const json = JSON.stringify(joinMsg);
+          const encrypted = await GameCrypto.encrypt(json, roomKey);
+          this.conn.send(encrypted);
+
+          log(`${this.userName} sent join request`, 'info');
+
+          // Wait for seat assignment
+          await new Promise((resolve, reject) => {
+            this.conn.on('data', async (data) => {
+              try {
+                const decrypted = await GameCrypto.decrypt(data, roomKey);
+                const msg = JSON.parse(decrypted);
+                
+                if (msg.type === 'SEAT_ASSIGNED') {
+                  this.seat = msg.seat;
+                  const joinTime = Date.now() - startTime;
+                  log(`${this.userName} assigned to seat ${this.seat} (${joinTime}ms)`, 'success');
+                  
+                  stats.connected++;
+                  updateStats();
+                  updateUserCard(this.userId, { 
+                    name: this.userName, 
+                    status: 'connected', 
+                    seat: this.seat,
+                    time: joinTime + 'ms'
+                  });
+                  resolve();
+                } else if (msg.type === 'ERROR') {
+                  throw new Error(msg.message);
+                }
+              } catch (e) {
+                log(`${this.userName} message error: ${e.message}`, 'error');
+                reject(e);
+              }
+            });
+
+            setTimeout(() => reject(new Error('Seat assignment timeout')), 10000);
+          });
+
+        } catch (err) {
+          const joinTime = Date.now() - startTime;
+          stats.failed++;
+          updateStats();
+          
+          log(`${this.userName} failed: ${err.message}`, 'error');
+          updateUserCard(this.userId, { 
+            name: this.userName, 
+            status: 'failed', 
+            error: err.message,
+            time: joinTime + 'ms'
+          });
+        }
+      }
+
+      destroy() {
+        if (this.conn) this.conn.close();
+        if (this.peer) this.peer.destroy();
+      }
+    }
+
+    async function startRealisticTest() {
+      const hostId = document.getElementById('hostId').value.trim();
+      const roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+      const userCount = parseInt(document.getElementById('userCount').value);
+      const delay = parseInt(document.getElementById('delay').value);
+
+      if (!hostId || !roomCode) {
+        alert('Please enter Host ID and Room Code');
+        return;
+      }
+
+      if (userCount < 1 || userCount > 5) {
+        alert('User count must be between 1 and 5');
+        return;
+      }
+
+      testRunning = true;
+      stats.total = userCount;
+      stats.connected = 0;
+      stats.failed = 0;
+      updateStats();
+
+      log(`Starting realistic test: ${userCount} users joining room ${roomCode}`, 'info');
+      log(`Host ID: ${hostId}`, 'info');
+      log(`Delay between joins: ${delay}ms`, 'info');
+
+      for (let i = 1; i <= userCount && testRunning; i++) {
+        const user = new TestUser(i, `TestUser${i}`, hostId, roomCode);
+        users.push(user);
+        
+        user.join().catch(err => {
+          log(`User ${i} join failed: ${err.message}`, 'error');
+        });
+        
+        if (i < userCount) {
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+
+      log('All users initiated', 'info');
+    }
+
+    function stopTest() {
+      testRunning = false;
+      users.forEach(user => user.destroy());
+      users = [];
+      log('Test stopped', 'warning');
+    }
+
+    function clearResults() {
+      stats = { total: 0, connected: 0, failed: 0 };
+      updateStats();
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('userList').innerHTML = '';
+      users = [];
+      log('Results cleared', 'info');
+    }
+  </script>
+</body>
+</html>
