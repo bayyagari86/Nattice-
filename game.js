@@ -240,6 +240,12 @@ const Game = (() => {
       case 'RAISE_BID':
         handleRaiseBid(fromPeer, msg);
         break;
+      case 'RAISE_COMMIT':
+        handleRaiseCommit(fromPeer, msg);
+        break;
+      case 'EXTEND_TIMER':
+        handleExtendTimer(fromPeer, msg);
+        break;
       case 'NO_RAISE':
         handleNoRaise(fromPeer);
         break;
@@ -438,6 +444,8 @@ const Game = (() => {
       currentPlayer: (state.dealer + 1) % 6,
       tricksPlayed: 0,
       raised: false,
+      raiseCommitments: {}, // seat -> number of additional tricks they can win
+      raiseTimer: null,
     };
     state.hands = hands;
 
@@ -673,15 +681,16 @@ const Game = (() => {
             // Bidding team is winning — offer raise
             state.phase = 'RAISE_CHECK';
             state.currentRound.currentTrick = [];
+            state.currentRound.raiseCommitments = {};
+            state.currentRound.raiseTimer = 20; // 20 seconds
             broadcastState();
             if (!isSoloMode) Network.broadcast({ type: 'RAISE_PROMPT' });
             UI.updateAll(state, mySeat);
             if (Engine.getTeam(mySeat) === biddingTeam) {
               UI.showRaisePrompt(state);
             } else if (isSoloMode) {
-              // AI team is the bidding team — let AI decide
-              const aiBidder = state.currentRound.bidder;
-              setTimeout(() => aiHandleRaise(aiBidder), 800);
+              // AI teammates suggest their capability
+              setTimeout(() => aiSuggestRaiseCommitment(), 1000);
             }
             return;
           }
@@ -728,7 +737,49 @@ const Game = (() => {
     const seat = peerToSeat.get(fromPeer);
     if (!seat && seat !== 0) return;
     if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
+    // Only bidder can confirm final raise
+    if (seat !== state.currentRound.bidder) return;
     processRaise(msg.newBid);
+  }
+
+  function handleRaiseCommit(fromPeer, msg) {
+    const seat = peerToSeat.get(fromPeer);
+    if (!seat && seat !== 0) return;
+    if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
+    state.currentRound.raiseCommitments[seat] = msg.tricks;
+    broadcastState();
+    UI.updateAll(state, mySeat);
+  }
+
+  function handleExtendTimer(fromPeer, msg) {
+    const seat = peerToSeat.get(fromPeer);
+    if (!seat && seat !== 0) return;
+    if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
+    state.currentRound.raiseTimer += 10;
+    broadcastState();
+    UI.updateAll(state, mySeat);
+  }
+
+  function commitRaiseTricks(tricks) {
+    if (isSoloMode || Network.getIsHost()) {
+      state.currentRound.raiseCommitments[mySeat] = tricks;
+      broadcastState();
+      UI.updateAll(state, mySeat);
+    } else {
+      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
+      Network.sendTo(hostPeerId, { type: 'RAISE_COMMIT', tricks });
+    }
+  }
+
+  function extendRaiseTimer() {
+    if (isSoloMode || Network.getIsHost()) {
+      state.currentRound.raiseTimer += 10;
+      broadcastState();
+      UI.updateAll(state, mySeat);
+    } else {
+      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
+      Network.sendTo(hostPeerId, { type: 'EXTEND_TIMER' });
+    }
   }
 
   function raiseBid(newBid) {
@@ -1257,6 +1308,52 @@ const Game = (() => {
     return Engine.RANK_VALUES[card.rank];
   }
 
+  // AI teammates suggest how many tricks they can win during raise discussion
+  function aiSuggestRaiseCommitment() {
+    const biddingTeam = state.currentRound.biddingTeam;
+    const aiSeats = [1, 2, 3, 4, 5].filter(s => 
+      state.players[s]?.isAI && Engine.getTeam(s) === biddingTeam
+    );
+
+    for (const seat of aiSeats) {
+      const hand = state.hands[seat];
+      if (!hand || hand.length === 0) continue;
+
+      const trump = state.currentRound.trumpSuit;
+      const eval_ = aiEvalHand(hand);
+      
+      // Estimate additional tricks AI can win
+      let canWin = 0;
+      const hasBigJoker = hand.some(c => c.id === 'BIG_JOKER');
+      const hasSmallJoker = hand.some(c => c.id === 'SMALL_JOKER');
+      const trumpCards = hand.filter(c => c.suit === trump);
+      const highTrump = trumpCards.filter(c => Engine.RANK_VALUES[c.rank] >= 11); // A or K
+      
+      if (hasBigJoker) canWin++;
+      if (hasSmallJoker && !aiMemory.opponentTrumpA[trump]) canWin++;
+      canWin += Math.min(highTrump.length, 2);
+      
+      // Cap at remaining tricks
+      const remaining = 4; // 9 total - 5 played
+      canWin = Math.min(canWin, remaining);
+
+      if (canWin > 0) {
+        state.currentRound.raiseCommitments[seat] = canWin;
+        const playerName = state.players[seat].name;
+        const msg = canWin === 1 ? `I can take 1 more 💪` : `I can win ${canWin} more 🔥`;
+        setTimeout(() => {
+          UI.addChatMessage(playerName, msg);
+        }, 500 + seat * 300);
+      }
+    }
+
+    // Update UI after all AI commitments
+    setTimeout(() => {
+      broadcastState();
+      UI.updateAll(state, mySeat);
+    }, 2000);
+  }
+
   function getLowest(cards, trump) {
     return cards.sort((a, b) => {
       if (a.suit === 'joker') return 1;
@@ -1347,7 +1444,7 @@ const Game = (() => {
     hostGame, joinGame, startGame, startSoloGame,
     getState, getMySeat, getMyTeam,
     makeBid, selectTrump, playCard,
-    raiseBid, noRaise, sendChat,
+    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat,
     stopAINameRotation,
   };
 })();

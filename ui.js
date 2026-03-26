@@ -439,6 +439,10 @@ const UI = (() => {
         { label: '😂 ଦାଦା!',  phrase: 'ଦାଦା, କଣ କଲେ? 😂',          chat: 'ଦାଦା, କଣ କଲେ? 😂' },
         { label: '🃏 ଜୋକର!',  phrase: 'ଜୋକର ଦେବ ନାହିଁ! 🃏',       chat: 'ଜୋକର ଦେବ ନାହିଁ! 🃏' },
         { label: '😤 ହୁଁ!',   phrase: 'ହଁ ହଁ! ହୁଁ! 😤',            chat: 'ହଁ ହଁ! ହୁଁ! 😤' },
+        { label: '💪 ଜବରଦସ୍ତ!', phrase: 'ଜବରଦସ୍ତ ଖେଳ! 💪',        chat: 'ଜବରଦସ୍ତ ଖେଳ! 💪' },
+        { label: '🤔 କଣ?',    phrase: 'ଏଇଟା କଣ କଲ? 🤔',          chat: 'ଏଇଟା କଣ କଲ? 🤔' },
+        { label: '😎 ବାପ୍ରେ!', phrase: 'ବାପ୍ରେ ବାପ୍! 😎',           chat: 'ବାପ୍ରେ ବାପ୍! 😎' },
+        { label: '🎯 ସଟ୍!',   phrase: 'ଏକଦମ୍ ସଟ୍! 🎯',           chat: 'ଏକଦମ୍ ସଟ୍! 🎯' },
       ];
       const reactionBarHtml = seat === mySeat
         ? `<div class="reaction-bar">${ODIA_REACTIONS.map((r,idx) =>
@@ -450,10 +454,10 @@ const UI = (() => {
 
       el.innerHTML = `
         <div class="reaction-float" id="reaction-float-${seat}"></div>
-        ${reactionBarHtml}
         <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
         <div class="player-name">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
         <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}</div>
+        ${reactionBarHtml}
         ${cardBacksHtml}
       `;
 
@@ -785,33 +789,81 @@ const UI = (() => {
   function showRaisePrompt(state) {
     const panel = document.getElementById('raise-panel');
     panel.style.display = 'flex';
+    
+    const mySeat = Game.getMySeat();
+    const isBidder = mySeat === state.currentRound.bidder;
+    const biddingTeam = state.currentRound.biddingTeam;
+    const tricksWon = state.currentRound.tricksTaken[biddingTeam];
+    const currentBid = state.currentRound.bid;
+    
+    // Calculate cumulative commitments
+    const commitments = state.currentRound.raiseCommitments || {};
+    let totalCommitted = 0;
+    let commitmentsList = '';
+    for (const [seat, tricks] of Object.entries(commitments)) {
+      totalCommitted += tricks;
+      const playerName = state.players[seat]?.name || `Player ${parseInt(seat) + 1}`;
+      commitmentsList += `<div class="commitment-item">${playerName}: +${tricks}</div>`;
+    }
+    
+    const potentialTotal = tricksWon + totalCommitted;
+    const timer = state.currentRound.raiseTimer || 20;
+    
     panel.innerHTML = `
-      <div class="bid-title">Raise Your Bid?</div>
-      <div class="raise-info">Current bid: ${state.currentRound.bid} | Tricks won: ${state.currentRound.tricksTaken[state.currentRound.biddingTeam]}</div>
-      <div class="bid-buttons" id="raise-buttons"></div>
+      <div class="bid-title">Raise Discussion (${timer}s)</div>
+      <div class="raise-info">Current bid: ${currentBid} | Tricks won: ${tricksWon}</div>
+      ${commitmentsList ? `<div class="commitments-box">${commitmentsList}<div class="commitment-total">Potential: ${potentialTotal} tricks</div></div>` : ''}
+      <div class="raise-commitment" id="raise-commitment">
+        <label>I can win:</label>
+        <select id="my-commitment">
+          <option value="0">0 more</option>
+          <option value="1">1 more</option>
+          <option value="2">2 more</option>
+          <option value="3">3 more</option>
+          <option value="4">4 more</option>
+        </select>
+        <button class="bid-btn" id="commit-btn" style="padding:8px 16px;font-size:12px;">Commit</button>
+      </div>
+      <button class="bid-btn" id="extend-timer-btn" style="padding:6px 12px;font-size:11px;margin-top:8px;">+10s</button>
+      ${isBidder ? '<div class="bid-buttons" id="raise-buttons"></div>' : '<div class="raise-waiting">Waiting for bidder to decide...</div>'}
     `;
-    const btns = document.getElementById('raise-buttons');
-
-    const noBtn = document.createElement('button');
-    noBtn.className = 'bid-btn pass-btn';
-    noBtn.textContent = 'No Raise';
-    noBtn.addEventListener('click', () => {
-      panel.style.display = 'none';
-      Game.noRaise();
+    
+    // Wire up commitment button
+    document.getElementById('commit-btn')?.addEventListener('click', () => {
+      const tricks = parseInt(document.getElementById('my-commitment').value);
+      Game.commitRaiseTricks(tricks);
     });
-    btns.appendChild(noBtn);
-
-    for (let b = state.currentRound.bid + 1; b <= 9; b++) {
-      const btn = document.createElement('button');
-      btn.className = 'bid-btn';
-      btn.textContent = b;
-      if (b === 8) btn.textContent = `${b} (LS)`;
-      if (b === 9) btn.textContent = `${b} (GS)`;
-      btn.addEventListener('click', () => {
+    
+    // Wire up extend timer button
+    document.getElementById('extend-timer-btn')?.addEventListener('click', () => {
+      Game.extendRaiseTimer();
+    });
+    
+    // Only bidder sees raise/no-raise buttons
+    if (isBidder) {
+      const btns = document.getElementById('raise-buttons');
+      
+      const noBtn = document.createElement('button');
+      noBtn.className = 'bid-btn pass-btn';
+      noBtn.textContent = 'No Raise';
+      noBtn.addEventListener('click', () => {
         panel.style.display = 'none';
-        Game.raiseBid(b);
+        Game.noRaise();
       });
-      btns.appendChild(btn);
+      btns.appendChild(noBtn);
+      
+      for (let b = currentBid + 1; b <= 9; b++) {
+        const btn = document.createElement('button');
+        btn.className = 'bid-btn';
+        btn.textContent = b;
+        if (b === 8) btn.textContent = `${b} (LS)`;
+        if (b === 9) btn.textContent = `${b} (GS)`;
+        btn.addEventListener('click', () => {
+          panel.style.display = 'none';
+          Game.raiseBid(b);
+        });
+        btns.appendChild(btn);
+      }
     }
   }
 
