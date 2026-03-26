@@ -297,6 +297,13 @@ const Game = (() => {
         UI.updateAll(state, mySeat);
         UI.showToast('Cards dealt!');
         break;
+      case 'HAND_UPDATE':
+        // Update our hand after playing a card
+        if (msg.hand) {
+          state.hands[mySeat] = msg.hand;
+          UI.updateAll(state, mySeat);
+        }
+        break;
       case 'PEER_LIST':
         // Connect to other peers for mesh
         for (const pid of msg.peers) {
@@ -701,6 +708,18 @@ const Game = (() => {
     // Next player in the trick
     state.currentRound.currentPlayer = (seat + 1) % 6;
     broadcastState();
+    
+    // Send updated hand to network player AFTER broadcastState to avoid race condition
+    if (!isSoloMode && seat !== 0) {
+      const playerPeerId = seatToPeer.get(seat);
+      if (playerPeerId) {
+        Network.sendTo(playerPeerId, {
+          type: 'HAND_UPDATE',
+          hand: state.hands[seat],
+        });
+      }
+    }
+    
     UI.updateAll(state, mySeat);
     checkAITurn();
   }
