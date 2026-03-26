@@ -100,21 +100,90 @@ const Network = (() => {
     return { roomCode, peerId: myPeerId };
   }
 
-  async function joinRoom(hostPeerId, roomCode) {
+  async function joinRoom(hostPeerId, roomCode, retryCount = 0) {
     isHost = false;
     const salt = 'TrumpCall_' + roomCode;
     roomKey = await GameCrypto.deriveRoomKey(roomCode, salt);
-
+    
     return new Promise((resolve, reject) => {
-      const conn = peer.connect(hostPeerId, { reliable: true });
-      // Register all listeners immediately before open fires
-      setupConnection(conn);
-      conn.on('open', () => {
-        if (onConnectedCallback) onConnectedCallback(hostPeerId);
-        resolve(conn);
+      console.log(`[Network] Attempting to connect to host (attempt ${retryCount + 1}/3)...`);
+      
+      const conn = peer.connect(hostPeerId, { 
+        reliable: true,
+        serialization: 'json'
       });
-      conn.on('error', reject);
-      setTimeout(() => reject(new Error('Connection timeout')), 15000);
+      
+      setupConnection(conn);
+      
+      let resolved = false;
+      
+      conn.on('open', () => {
+        if (resolved) return;
+        resolved = true;
+        console.log('[Network] Successfully connected to host');
+        if (onConnectedCallback) onConnectedCallback();
+        resolve({ roomCode, hostPeerId });
+      });
+      
+      conn.on('error', (err) => {
+        if (resolved) return;
+        resolved = true;
+        console.error('[Network] Connection error:', err);
+        
+        // Retry on failure (up to 3 attempts)
+        if (retryCount < 2) {
+          setTimeout(() => {
+            joinRoom(hostPeerId, roomCode, retryCount + 1)
+              .then(resolve)
+              .catch(reject);
+          }, 2000 * (retryCount + 1));
+        } else {
+          reject(new Error('Failed to connect after 3 attempts. Check Host ID and try again.'));
+        }
+      });
+      
+      setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        console.warn('[Network] Connection timeout');
+        
+        // Retry on timeout
+        if (retryCount < 2) {
+          joinRoom(hostPeerId, roomCode, retryCount + 1)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(new Error('Connection timeout. Host may be offline.'));
+        }
+      }, 15000);
+    });
+  }
+
+  async function discoverHost(roomCode) {
+    const salt = 'TrumpCall_' + roomCode;
+    roomKey = await GameCrypto.deriveRoomKey(roomCode, salt);
+    
+    return new Promise((resolve, reject) => {
+      // Listen for host response
+      const originalCallback = onMessageCallback;
+      const timeout = setTimeout(() => {
+        onMessageCallback = originalCallback;
+        reject(new Error('Host discovery timeout - room may not exist'));
+      }, 10000);
+
+      onMessageCallback = (fromPeer, msg) => {
+        if (msg.type === 'HOST_ANNOUNCE' && msg.roomCode === roomCode) {
+          clearTimeout(timeout);
+          onMessageCallback = originalCallback;
+          resolve(msg.hostPeerId);
+        } else if (originalCallback) {
+          originalCallback(fromPeer, msg);
+        }
+      };
+
+      // Broadcast discovery request - try connecting to potential host IDs
+      // This is a simplified approach - in production you'd use a signaling server
+      reject(new Error('Room discovery not yet implemented - please use host ID'));
     });
   }
 
@@ -170,8 +239,9 @@ const Network = (() => {
   }
 
   return {
-    init, createRoom, joinRoom, connectToPeer,
-    sendTo, broadcast,
+    init, createRoom, joinRoom, discoverHost,
+    connectToPeer,
+    broadcast, sendTo,
     onMessage, onPeerJoin, onPeerLeave, onConnected,
     getPeerId, getIsHost, getConnectedPeers, getPeerCount,
     destroy,

@@ -90,12 +90,12 @@ const UI = (() => {
         document.getElementById('start-game-btn').style.display = 'block';
         document.getElementById('start-game-btn').addEventListener('click', () => Game.startGame());
 
-        // Generate QR code with web URL for easy joining
+        // Generate QR code with simplified URL (room code only)
         const qrContainer = document.getElementById('qr-code-container');
         const qrEl = document.getElementById('qr-code');
         const qrUrlEl = document.getElementById('qr-join-url');
         if (hostId) {
-          const joinUrl = `${window.location.origin}${window.location.pathname}?host=${hostId}&room=${roomCode}`;
+          const joinUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}&host=${hostId}`;
           
           // Display clickable URL text
           if (qrUrlEl) {
@@ -130,12 +130,13 @@ const UI = (() => {
     showMultiInputDialog([
       { label: 'Your Name', placeholder: 'Player', key: 'name', value: '' },
       { label: 'Room Code', placeholder: 'ABC123', key: 'code', value: prefillRoom },
-      { label: 'Host ID', placeholder: 'TC_...', key: 'hostId', value: prefillHost },
+      { label: 'Host ID (optional)', placeholder: 'Leave blank to auto-discover', key: 'hostId', value: prefillHost },
     ], (vals) => {
-      if (!vals.name || !vals.code || !vals.hostId) { showToast('All fields required'); return; }
+      if (!vals.name || !vals.code) { showToast('Name and Room Code required'); return; }
       showScreen('lobby-screen');
       document.getElementById('lobby-status').textContent = 'Joining room...';
-      Game.joinGame(vals.name.trim(), vals.hostId.trim(), vals.code.trim().toUpperCase()).catch(err => {
+      const hostId = vals.hostId.trim() || null;
+      Game.joinGame(vals.name.trim(), hostId, vals.code.trim().toUpperCase()).catch(err => {
         showToast('Failed to join: ' + err.message);
         showScreen('title-screen');
       });

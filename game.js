@@ -188,6 +188,12 @@ const Game = (() => {
 
     await Network.init();
     myPeerId = Network.getPeerId();
+    
+    // If no host ID provided, try auto-discovery (for now, require host ID)
+    if (!hostPeerId) {
+      throw new Error('Host ID required. Please get it from the host.');
+    }
+    
     await Network.joinRoom(hostPeerId, code);
 
     // Send join request to host
@@ -246,6 +252,9 @@ const Game = (() => {
       case 'EXTEND_TIMER':
         handleExtendTimer(fromPeer, msg);
         break;
+      case 'CARD_PLAYED':
+        handleCardPlayed(fromPeer, msg);
+        break;
       case 'NO_RAISE':
         handleNoRaise(fromPeer);
         break;
@@ -303,12 +312,9 @@ const Game = (() => {
         UI.updateAll(state, mySeat);
         UI.showToast('Cards dealt!');
         break;
-      case 'HAND_UPDATE':
-        // Update our hand after playing a card
-        if (msg.hand) {
-          state.hands[mySeat] = msg.hand;
-          UI.updateAll(state, mySeat);
-        }
+      case 'CARD_PLAYED':
+        // Sync card removal across all clients
+        handleCardPlayed(null, msg);
         break;
       case 'PEER_LIST':
         // Connect to other peers for mesh
@@ -638,6 +644,11 @@ const Game = (() => {
     // Remove card from hand
     hand.splice(cardIdx, 1);
 
+    // Broadcast card played to all clients (simpler than HAND_UPDATE)
+    if (!isSoloMode) {
+      Network.broadcast({ type: 'CARD_PLAYED', seat, cardId });
+    }
+
     // Add to current trick
     state.currentRound.currentTrick.push({ playerIndex: seat, card });
 
@@ -724,18 +735,6 @@ const Game = (() => {
     // Next player in the trick
     state.currentRound.currentPlayer = (seat + 1) % 6;
     broadcastState();
-    
-    // Send updated hand to network player AFTER broadcastState to avoid race condition
-    if (!isSoloMode && seat !== 0) {
-      const playerPeerId = seatToPeer.get(seat);
-      if (playerPeerId) {
-        Network.sendTo(playerPeerId, {
-          type: 'HAND_UPDATE',
-          hand: state.hands[seat],
-        });
-      }
-    }
-    
     UI.updateAll(state, mySeat);
     checkAITurn();
   }
@@ -765,6 +764,19 @@ const Game = (() => {
     state.currentRound.raiseTimer += 10;
     broadcastState();
     UI.updateAll(state, mySeat);
+  }
+
+  function handleCardPlayed(fromPeer, msg) {
+    // Host already processed this, so this is only for other clients
+    if (Network.getIsHost()) return;
+    // Remove the card from the player's hand on all clients
+    const hand = state.hands[msg.seat];
+    if (!hand) return;
+    const cardIdx = hand.findIndex(c => c.id === msg.cardId);
+    if (cardIdx !== -1) {
+      hand.splice(cardIdx, 1);
+      UI.updateAll(state, mySeat);
+    }
   }
 
   function commitRaiseTricks(tricks) {
