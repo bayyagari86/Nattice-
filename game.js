@@ -608,6 +608,13 @@ const Game = (() => {
     if (isSoloMode || Network.getIsHost()) {
       processPlayCard(mySeat, cardId);
     } else {
+      // Client: optimistically remove card from own hand immediately
+      const hand = state.hands[mySeat];
+      const cardIdx = hand.findIndex(c => c.id === cardId);
+      if (cardIdx !== -1) {
+        hand.splice(cardIdx, 1);
+        UI.updateAll(state, mySeat);
+      }
       const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
       Network.sendTo(hostPeerId, { type: 'PLAY_CARD', cardId });
     }

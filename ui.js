@@ -21,8 +21,12 @@ const UI = (() => {
     const qrHost = urlParams.get('host');
     const qrRoom = urlParams.get('room');
     if (qrHost && qrRoom) {
-      // Auto-trigger join dialog with pre-filled values
-      setTimeout(() => showJoinDialog(qrHost, qrRoom), 500);
+      // Show immediate feedback
+      showToast(`Auto-joining room ${qrRoom}...`);
+      // Auto-trigger join dialog with pre-filled values after DOM is ready
+      setTimeout(() => {
+        showJoinDialog(qrHost, qrRoom);
+      }, 800);
     }
 
     document.getElementById('solo-btn').addEventListener('click', startSoloGame);
