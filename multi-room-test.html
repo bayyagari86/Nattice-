@@ -137,6 +137,7 @@
   <div class="header">
     <h1>🎮 Multi-Room Test - 120 Users, 20 Games</h1>
     <p style="margin: 10px 0 0 0; color: #8b9dc3;">Host 20 games simultaneously with 6 players each (120 total users)</p>
+    <p style="margin: 5px 0 0 0; color: #fbbf24; font-size: 12px;">⚠️ Start with 2-3 games to test. Use "New Tabs" mode to avoid popup blocking.</p>
   </div>
 
   <div class="controls">
@@ -150,8 +151,8 @@
 
     <div style="margin-bottom: 15px;">
       <label style="display: inline-block; width: 150px;">Concurrent Games:</label>
-      <input type="number" id="concurrentGames" value="5" min="1" max="10" style="width: 100px;">
-      <span style="color: #8b9dc3; font-size: 12px;">(Games hosted simultaneously)</span>
+      <input type="number" id="concurrentGames" value="2" min="1" max="5" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Games hosted simultaneously - start small)</span>
     </div>
 
     <div style="margin-bottom: 15px;">
@@ -163,8 +164,8 @@
     <div style="margin-bottom: 15px;">
       <label style="display: inline-block; width: 150px;">Window Type:</label>
       <select id="windowType">
+        <option value="tab" selected>New Tabs (Recommended)</option>
         <option value="popup">Popup Windows</option>
-        <option value="tab">New Tabs</option>
         <option value="hidden">Hidden (Background)</option>
       </select>
     </div>
