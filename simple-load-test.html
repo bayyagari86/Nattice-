@@ -136,8 +136,14 @@
 
     <div style="margin-bottom: 15px;">
       <label style="display: inline-block; width: 150px;">Concurrent Rooms:</label>
-      <input type="number" id="concurrentRooms" value="3" min="1" max="10" style="width: 100px;">
-      <span style="color: #8b9dc3; font-size: 12px;">(Rooms running at same time)</span>
+      <input type="number" id="concurrentRooms" value="2" min="1" max="5" style="width: 100px;">
+      <span style="color: #fbbf24; font-size: 12px;">⚠️ Keep ≤2 to avoid PeerJS rate limiting</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Batch Delay (ms):</label>
+      <input type="number" id="batchDelay" value="3000" min="1000" max="10000" step="500" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Wait between batches of rooms)</span>
     </div>
 
     <div style="margin-bottom: 15px;">
@@ -435,12 +441,16 @@
       }
     }
 
-    async function runRoomSession(roomId, maxPlayers, joinDelay) {
+    async function runRoomSession(roomId, maxPlayers, joinDelay, retryCount = 0) {
       const startTime = Date.now();
       
       try {
         log(`Creating room ${roomId}...`, 'info');
         updateRoomCard(roomId, { status: 'active', roomCode: '...', players: 0, maxPlayers });
+
+        // Stagger peer creation to avoid PeerJS rate limiting
+        // Each room waits (roomId * 300ms) offset within its batch
+        await new Promise(r => setTimeout(r, (roomId % 3) * 500));
 
         const room = new SimulatedRoom(roomId, maxPlayers);
         await room.init();
@@ -502,12 +512,23 @@
         log(`Room ${roomId} completed in ${Math.round(roomTime / 1000)}s - ${seats.length}/${maxPlayers} players`, 'success');
 
       } catch (err) {
+        // Retry on PeerJS server rate-limit errors
+        if ((err.message.includes('Lost connection') || err.message.includes('server')) && retryCount < 2) {
+          const waitMs = 3000 * (retryCount + 1);
+          log(`Room ${roomId} server error - retrying in ${waitMs/1000}s... (attempt ${retryCount + 1}/3)`, 'warning');
+          await new Promise(r => setTimeout(r, waitMs));
+          return runRoomSession(roomId, maxPlayers, joinDelay, retryCount + 1);
+        }
+
         stats.activeRooms--;
         stats.failedRooms++;
         updateStats();
         
         updateRoomCard(roomId, { 
           status: 'error',
+          roomCode: 'N/A',
+          players: 0,
+          maxPlayers,
           error: err.message
         });
         
@@ -536,11 +557,19 @@
       const queue = [];
       for (let i = 1; i <= roomCount; i++) queue.push(i);
 
-      // Process in concurrent batches
+      const batchDelay = parseInt(document.getElementById('batchDelay').value);
+
+      // Process in concurrent batches with delay between batches
+      let batchNum = 1;
       while (queue.length > 0 && testRunning) {
         const batch = queue.splice(0, concurrentRooms);
-        log(`Running batch: rooms [${batch.join(', ')}]`, 'info');
+        log(`Batch ${batchNum}: rooms [${batch.join(', ')}]`, 'info');
         await Promise.allSettled(batch.map(id => runRoomSession(id, playersPerRoom, joinDelay)));
+        batchNum++;
+        if (queue.length > 0 && testRunning) {
+          log(`Waiting ${batchDelay/1000}s before next batch to avoid rate limiting...`, 'warning');
+          await new Promise(r => setTimeout(r, batchDelay));
+        }
       }
 
       testRunning = false;
