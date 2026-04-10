@@ -152,6 +152,15 @@
       <span style="color: #8b9dc3; font-size: 12px;">(Delay between player joins per room)</span>
     </div>
 
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">PeerJS Server:</label>
+      <select id="peerServer" onchange="updateServerNote()">
+        <option value="local">Local (localhost:9000) - Unlimited ✅</option>
+        <option value="cloud">Cloud (peerjs.com) - Rate Limited ⚠️</option>
+      </select>
+      <span id="serverNote" style="color: #4ade80; font-size: 12px;">Run: npx peer --port 9000 --key peerjs --path /myapp</span>
+    </div>
+
     <div style="margin-top: 20px;">
       <button onclick="startSimpleTest()" id="startBtn">🚀 Start Simple Test</button>
       <button onclick="stopTest()" id="stopBtn" disabled>⏹️ Stop Test</button>
@@ -277,15 +286,13 @@
       async init() {
         return new Promise((resolve, reject) => {
           const peerId = 'TC_ROOM_' + this.roomId + '_' + Math.random().toString(36).substring(2, 6);
+          const useLocal = document.getElementById('peerServer').value === 'local';
           
-          this.peer = new Peer(peerId, {
-            config: {
-              iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-              ]
-            }
-          });
+          const peerOptions = useLocal
+            ? { host: 'localhost', port: 9000, path: '/myapp', key: 'peerjs', config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } }
+            : { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } };
+          
+          this.peer = new Peer(peerId, peerOptions);
 
           this.peer.on('open', async (id) => {
             this.peerId = id;
@@ -363,14 +370,11 @@
       async addSimulatedPlayer(playerName) {
         return new Promise(async (resolve, reject) => {
           // Step 1: Create and fully initialize a real PeerJS peer for the joiner
-          const joinerPeer = new Peer(undefined, {
-            config: {
-              iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-              ]
-            }
-          });
+          const useLocal = document.getElementById('peerServer').value === 'local';
+          const joinerOptions = useLocal
+            ? { host: 'localhost', port: 9000, path: '/myapp', key: 'peerjs', config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] } }
+            : { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } };
+          const joinerPeer = new Peer(undefined, joinerOptions);
 
           const joinerReady = await new Promise((res, rej) => {
             joinerPeer.on('open', id => res(id));
@@ -602,6 +606,18 @@
       document.getElementById('logContainer').innerHTML = '';
       document.getElementById('roomList').innerHTML = '';
       log('Results cleared', 'info');
+    }
+
+    function updateServerNote() {
+      const val = document.getElementById('peerServer').value;
+      const note = document.getElementById('serverNote');
+      if (val === 'local') {
+        note.style.color = '#4ade80';
+        note.textContent = '✅ Local server - unlimited connections. Must be running: npx peer --port 9000 --key peerjs --path /myapp';
+      } else {
+        note.style.color = '#f87171';
+        note.textContent = '⚠️ Cloud server - rate limited to ~6 rooms before throttling';
+      }
     }
 
     window.addEventListener('beforeunload', () => {
