@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Load Test - Create Rooms & Test Joiners</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0e14;
+      color: #c8d3e8;
+      padding: 20px;
+      margin: 0;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a2332 0%, #0d1219 100%);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 2px solid #d4af37;
+    }
+    h1 {
+      margin: 0;
+      color: #d4af37;
+      font-size: 28px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3342;
+    }
+    input, button, select {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+      background: #0f1520;
+      border: 1px solid #2a3342;
+      color: #c8d3e8;
+      border-radius: 6px;
+    }
+    button {
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover { background: #e8c55b; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid #2a3342;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #d4af37;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+    }
+    .log {
+      background: #0f1520;
+      padding: 15px;
+      border-radius: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #2a3342;
+      font-family: 'Courier New', monospace;
+    }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    .log-info { color: #60a5fa; }
+    .log-warning { color: #fbbf24; }
+    .room-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .room-card {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #2a3342;
+    }
+    .room-card.active { border-color: #4ade80; }
+    .room-card.full { border-color: #d4af37; }
+    .room-card.error { border-color: #f87171; }
+    .room-title {
+      font-weight: bold;
+      color: #d4af37;
+      margin-bottom: 10px;
+    }
+    .room-detail {
+      font-size: 11px;
+      color: #8b9dc3;
+      margin: 3px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎮 Simple Load Test</h1>
+    <p style="margin: 10px 0 0 0; color: #8b9dc3;">Create rooms programmatically and test joiners without opening browser windows</p>
+  </div>
+
+  <div class="controls">
+    <h3 style="color: #d4af37; margin-top: 0;">Test Configuration</h3>
+    
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Number of Rooms:</label>
+      <input type="number" id="roomCount" value="20" min="1" max="50" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(6 players per room = <span id="totalUsersCalc">120</span> users)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Players per Room:</label>
+      <input type="number" id="playersPerRoom" value="6" min="1" max="6" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Max 6 players per room)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Join Delay (ms):</label>
+      <input type="number" id="joinDelay" value="500" min="100" max="3000" step="100" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Delay between joins)</span>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <button onclick="startSimpleTest()" id="startBtn">🚀 Start Simple Test</button>
+      <button onclick="stopTest()" id="stopBtn" disabled>⏹️ Stop Test</button>
+      <button onclick="clearResults()">📋 Clear Results</button>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Rooms</div>
+      <div class="stat-value" id="totalRooms">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active</div>
+      <div class="stat-value" id="activeRooms" style="color: #4ade80;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Full</div>
+      <div class="stat-value" id="fullRooms" style="color: #d4af37;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value" id="failedRooms" style="color: #f87171;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Users</div>
+      <div class="stat-value" id="totalUsers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Joined Users</div>
+      <div class="stat-value" id="joinedUsers" style="color: #60a5fa;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value" id="successRate">0%</div>
+    </div>
+  </div>
+
+  <h3 style="color: #d4af37;">Room Sessions</h3>
+  <div class="room-list" id="roomList"></div>
+
+  <h3 style="color: #d4af37; margin-top: 30px;">Test Log</h3>
+  <div class="log" id="logContainer"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="crypto.js"></script>
+  <script>
+    let testRunning = false;
+    let rooms = [];
+    let stats = {
+      totalRooms: 0,
+      activeRooms: 0,
+      fullRooms: 0,
+      failedRooms: 0,
+      totalUsers: 0,
+      joinedUsers: 0
+    };
+
+    // Update user count calculation
+    document.getElementById('roomCount').addEventListener('input', (e) => {
+      document.getElementById('totalUsersCalc').textContent = e.target.value * document.getElementById('playersPerRoom').value;
+    });
+    document.getElementById('playersPerRoom').addEventListener('input', (e) => {
+      document.getElementById('totalUsersCalc').textContent = document.getElementById('roomCount').value * e.target.value;
+    });
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('logContainer');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-${type}`;
+      entry.textContent = `[${time}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalRooms').textContent = stats.totalRooms;
+      document.getElementById('activeRooms').textContent = stats.activeRooms;
+      document.getElementById('fullRooms').textContent = stats.fullRooms;
+      document.getElementById('failedRooms').textContent = stats.failedRooms;
+      document.getElementById('totalUsers').textContent = stats.totalUsers;
+      document.getElementById('joinedUsers').textContent = stats.joinedUsers;
+      
+      const successRate = stats.totalRooms > 0 
+        ? Math.round((stats.fullRooms / stats.totalRooms) * 100) 
+        : 0;
+      document.getElementById('successRate').textContent = successRate + '%';
+    }
+
+    function updateRoomCard(roomId, data) {
+      let card = document.getElementById(`room-${roomId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `room-${roomId}`;
+        card.className = 'room-card';
+        document.getElementById('roomList').appendChild(card);
+      }
+      
+      card.className = `room-card ${data.status}`;
+      card.innerHTML = `
+        <div class="room-title">Room #${roomId} - ${data.roomCode}</div>
+        <div class="room-detail">Status: ${data.status}</div>
+        <div class="room-detail">Players: ${data.players}/${data.maxPlayers}</div>
+        <div class="room-detail">Seats: ${data.seats || '...'}</div>
+        <div class="room-detail">Time: ${data.time || '...'}</div>
+        ${data.error ? `<div class="room-detail" style="color: #f87171;">Error: ${data.error}</div>` : ''}
+      `;
+    }
+
+    class SimulatedRoom {
+      constructor(roomId, maxPlayers) {
+        this.roomId = roomId;
+        this.roomCode = GameCrypto.generateRoomCode();
+        this.maxPlayers = maxPlayers;
+        this.players = [];
+        this.seats = [];
+        this.peer = null;
+        this.roomKey = null;
+        this.startTime = Date.now();
+      }
+
+      async init() {
+        return new Promise((resolve, reject) => {
+          const peerId = 'TC_ROOM_' + this.roomId + '_' + Math.random().toString(36).substring(2, 6);
+          
+          this.peer = new Peer(peerId, {
+            config: {
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ]
+            }
+          });
+
+          this.peer.on('open', async (id) => {
+            this.peerId = id;
+            
+            // Derive room key
+            const salt = 'TrumpCall_' + this.roomCode;
+            this.roomKey = await GameCrypto.deriveRoomKey(this.roomCode, salt);
+            
+            // Add host as player 0
+            this.players.push({
+              id: 'HOST_' + this.roomId,
+              name: 'Host' + this.roomId,
+              seat: 0,
+              peerId: id
+            });
+            this.seats.push(0);
+            
+            this.peer.on('connection', (conn) => {
+              this.handleConnection(conn);
+            });
+            
+            resolve({ roomCode: this.roomCode, hostId: id });
+          });
+
+          this.peer.on('error', reject);
+          setTimeout(() => reject(new Error('Room init timeout')), 10000);
+        });
+      }
+
+      handleConnection(conn) {
+        conn.on('data', async (data) => {
+          try {
+            const decrypted = await GameCrypto.decrypt(data, this.roomKey);
+            const msg = JSON.parse(decrypted);
+            
+            if (msg.type === 'JOIN_REQUEST') {
+              this.handleJoinRequest(conn, msg);
+            }
+          } catch (e) {
+            console.error('Message error:', e);
+          }
+        });
+      }
+
+      async handleJoinRequest(conn, msg) {
+        if (this.players.length >= this.maxPlayers) {
+          const error = { type: 'ERROR', message: 'Game is full' };
+          const json = JSON.stringify(error);
+          const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+          conn.send(encrypted);
+          return;
+        }
+
+        const seat = this.seats.length;
+        this.players.push({
+          id: msg.playerId,
+          name: msg.name,
+          seat: seat,
+          peerId: msg.peerId
+        });
+        this.seats.push(seat);
+
+        const response = {
+          type: 'SEAT_ASSIGNED',
+          seat: seat,
+          state: { players: this.players },
+          seatToPeer: {}
+        };
+
+        const json = JSON.stringify(response);
+        const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+        conn.send(encrypted);
+      }
+
+      async addSimulatedPlayer(playerName) {
+        return new Promise(async (resolve, reject) => {
+          try {
+            const playerPeerId = 'TC_PLAYER_' + this.roomId + '_' + Math.random().toString(36).substring(2, 6);
+            
+            const conn = this.peer.connect(playerPeerId, { reliable: true });
+            
+            conn.on('open', async () => {
+              const joinMsg = {
+                type: 'JOIN_REQUEST',
+                name: playerName,
+                playerId: 'PID_' + Math.random().toString(36).substring(2, 8),
+                peerId: playerPeerId,
+              };
+
+              const json = JSON.stringify(joinMsg);
+              const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+              conn.send(encrypted);
+
+              // Simulate receiving SEAT_ASSIGNED
+              setTimeout(() => {
+                if (this.players.length > this.seats.length) {
+                  const seat = this.seats.length;
+                  this.seats.push(seat);
+                  resolve(seat);
+                } else {
+                  reject(new Error('Room full'));
+                }
+              }, 100);
+            });
+
+            conn.on('error', reject);
+            setTimeout(() => reject(new Error('Join timeout')), 5000);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+
+      destroy() {
+        if (this.peer) this.peer.destroy();
+      }
+    }
+
+    async function runRoomSession(roomId, maxPlayers, joinDelay) {
+      const startTime = Date.now();
+      
+      try {
+        log(`Creating room ${roomId}...`, 'info');
+        updateRoomCard(roomId, { status: 'active', roomCode: '...', players: 0, maxPlayers });
+
+        const room = new SimulatedRoom(roomId, maxPlayers);
+        await room.init();
+        
+        rooms.push(room);
+        stats.activeRooms++;
+        updateStats();
+        
+        log(`Room ${roomId} created - Code: ${room.roomCode}`, 'success');
+        updateRoomCard(roomId, { 
+          status: 'active', 
+          roomCode: room.roomCode, 
+          players: 1, 
+          maxPlayers,
+          seats: '0'
+        });
+
+        // Add simulated players
+        const seats = [0];
+        for (let i = 1; i < maxPlayers; i++) {
+          try {
+            const playerName = `R${roomId}P${i}`;
+            const seat = await room.addSimulatedPlayer(playerName);
+            seats.push(seat);
+            stats.joinedUsers++;
+            updateStats();
+            
+            log(`Player ${playerName} joined room ${roomId} - Seat ${seat}`, 'success');
+            updateRoomCard(roomId, { 
+              status: 'active', 
+              roomCode: room.roomCode, 
+              players: seats.length, 
+              maxPlayers,
+              seats: seats.join(',')
+            });
+            
+            if (i < maxPlayers - 1) {
+              await new Promise(resolve => setTimeout(resolve, joinDelay));
+            }
+          } catch (err) {
+            log(`Player ${i} join failed for room ${roomId}: ${err.message}`, 'error');
+          }
+        }
+
+        const roomTime = Date.now() - startTime;
+        stats.activeRooms--;
+        stats.fullRooms++;
+        updateStats();
+        
+        updateRoomCard(roomId, { 
+          status: 'full',
+          roomCode: room.roomCode,
+          players: seats.length,
+          maxPlayers,
+          seats: seats.join(','),
+          time: Math.round(roomTime / 1000) + 's'
+        });
+        
+        log(`Room ${roomId} completed in ${Math.round(roomTime / 1000)}s - ${seats.length}/${maxPlayers} players`, 'success');
+
+      } catch (err) {
+        stats.activeRooms--;
+        stats.failedRooms++;
+        updateStats();
+        
+        updateRoomCard(roomId, { 
+          status: 'error',
+          error: err.message
+        });
+        
+        log(`Room ${roomId} failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function startSimpleTest() {
+      const roomCount = parseInt(document.getElementById('roomCount').value);
+      const playersPerRoom = parseInt(document.getElementById('playersPerRoom').value);
+      const joinDelay = parseInt(document.getElementById('joinDelay').value);
+
+      testRunning = true;
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+
+      stats.totalRooms = roomCount;
+      stats.totalUsers = roomCount * playersPerRoom;
+      updateStats();
+
+      log(`Starting simple test: ${roomCount} rooms, ${roomCount * playersPerRoom} users`, 'info');
+      log(`Players per room: ${playersPerRoom}, Join delay: ${joinDelay}ms`, 'info');
+
+      // Create all rooms in sequence (can be parallelized if needed)
+      for (let i = 1; i <= roomCount && testRunning; i++) {
+        await runRoomSession(i, playersPerRoom, joinDelay);
+      }
+
+      testRunning = false;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = false;
+      
+      log(`Simple test completed! ${stats.fullRooms}/${stats.totalRooms} rooms full`, 'info');
+    }
+
+    function stopTest() {
+      testRunning = false;
+      log('Test stopped by user', 'warning');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    function clearResults() {
+      rooms.forEach(room => room.destroy());
+      rooms = [];
+      stats = {
+        totalRooms: 0,
+        activeRooms: 0,
+        fullRooms: 0,
+        failedRooms: 0,
+        totalUsers: 0,
+        joinedUsers: 0
+      };
+      updateStats();
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('roomList').innerHTML = '';
+      log('Results cleared', 'info');
+    }
+
+    window.addEventListener('beforeunload', () => {
+      rooms.forEach(room => room.destroy());
+    });
+  </script>
+</body>
+</html>
