@@ -135,9 +135,15 @@
     </div>
 
     <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Concurrent Rooms:</label>
+      <input type="number" id="concurrentRooms" value="3" min="1" max="10" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Rooms running at same time)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
       <label style="display: inline-block; width: 150px;">Join Delay (ms):</label>
       <input type="number" id="joinDelay" value="500" min="100" max="3000" step="100" style="width: 100px;">
-      <span style="color: #8b9dc3; font-size: 12px;">(Delay between joins)</span>
+      <span style="color: #8b9dc3; font-size: 12px;">(Delay between player joins per room)</span>
     </div>
 
     <div style="margin-top: 20px;">
@@ -350,44 +356,81 @@
 
       async addSimulatedPlayer(playerName) {
         return new Promise(async (resolve, reject) => {
-          try {
-            const playerPeerId = 'TC_PLAYER_' + this.roomId + '_' + Math.random().toString(36).substring(2, 6);
-            
-            const conn = this.peer.connect(playerPeerId, { reliable: true });
-            
-            conn.on('open', async () => {
-              const joinMsg = {
-                type: 'JOIN_REQUEST',
-                name: playerName,
-                playerId: 'PID_' + Math.random().toString(36).substring(2, 8),
-                peerId: playerPeerId,
-              };
+          // Step 1: Create and fully initialize a real PeerJS peer for the joiner
+          const joinerPeer = new Peer(undefined, {
+            config: {
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ]
+            }
+          });
 
-              const json = JSON.stringify(joinMsg);
-              const encrypted = await GameCrypto.encrypt(json, this.roomKey);
-              conn.send(encrypted);
+          const joinerReady = await new Promise((res, rej) => {
+            joinerPeer.on('open', id => res(id));
+            joinerPeer.on('error', rej);
+            setTimeout(() => rej(new Error('Joiner peer init timeout')), 10000);
+          }).catch(err => { reject(err); return null; });
 
-              // Simulate receiving SEAT_ASSIGNED
-              setTimeout(() => {
-                if (this.players.length > this.seats.length) {
-                  const seat = this.seats.length;
-                  this.seats.push(seat);
-                  resolve(seat);
-                } else {
-                  reject(new Error('Room full'));
-                }
-              }, 100);
-            });
+          if (!joinerReady) return;
 
-            conn.on('error', reject);
-            setTimeout(() => reject(new Error('Join timeout')), 5000);
-          } catch (err) {
+          // Step 2: Connect joiner to the host peer
+          const conn = joinerPeer.connect(this.peerId, { reliable: true });
+
+          let done = false;
+
+          conn.on('open', async () => {
+            const joinMsg = {
+              type: 'JOIN_REQUEST',
+              name: playerName,
+              playerId: 'PID_' + Math.random().toString(36).substring(2, 8),
+              peerId: joinerReady,
+            };
+            const json = JSON.stringify(joinMsg);
+            const encrypted = await GameCrypto.encrypt(json, this.roomKey);
+            conn.send(encrypted);
+          });
+
+          conn.on('data', async (data) => {
+            if (done) return;
+            try {
+              const decrypted = await GameCrypto.decrypt(data, this.roomKey);
+              const msg = JSON.parse(decrypted);
+              if (msg.type === 'SEAT_ASSIGNED') {
+                done = true;
+                this.joinerPeers = this.joinerPeers || [];
+                this.joinerPeers.push(joinerPeer);
+                resolve(msg.seat);
+              } else if (msg.type === 'ERROR') {
+                done = true;
+                joinerPeer.destroy();
+                reject(new Error(msg.message));
+              }
+            } catch (e) {
+              done = true;
+              joinerPeer.destroy();
+              reject(e);
+            }
+          });
+
+          conn.on('error', (err) => {
+            if (done) return;
+            done = true;
+            joinerPeer.destroy();
             reject(err);
-          }
+          });
+
+          setTimeout(() => {
+            if (done) return;
+            done = true;
+            joinerPeer.destroy();
+            reject(new Error('Join timeout'));
+          }, 15000);
         });
       }
 
       destroy() {
+        if (this.joinerPeers) this.joinerPeers.forEach(p => { try { p.destroy(); } catch(e){} });
         if (this.peer) this.peer.destroy();
       }
     }
@@ -475,6 +518,7 @@
     async function startSimpleTest() {
       const roomCount = parseInt(document.getElementById('roomCount').value);
       const playersPerRoom = parseInt(document.getElementById('playersPerRoom').value);
+      const concurrentRooms = parseInt(document.getElementById('concurrentRooms').value);
       const joinDelay = parseInt(document.getElementById('joinDelay').value);
 
       testRunning = true;
@@ -485,19 +529,26 @@
       stats.totalUsers = roomCount * playersPerRoom;
       updateStats();
 
-      log(`Starting simple test: ${roomCount} rooms, ${roomCount * playersPerRoom} users`, 'info');
-      log(`Players per room: ${playersPerRoom}, Join delay: ${joinDelay}ms`, 'info');
+      log(`Starting test: ${roomCount} rooms, ${roomCount * playersPerRoom} users`, 'info');
+      log(`Concurrent: ${concurrentRooms} rooms | Players/room: ${playersPerRoom} | Join delay: ${joinDelay}ms`, 'info');
 
-      // Create all rooms in sequence (can be parallelized if needed)
-      for (let i = 1; i <= roomCount && testRunning; i++) {
-        await runRoomSession(i, playersPerRoom, joinDelay);
+      // Build queue of all room IDs
+      const queue = [];
+      for (let i = 1; i <= roomCount; i++) queue.push(i);
+
+      // Process in concurrent batches
+      while (queue.length > 0 && testRunning) {
+        const batch = queue.splice(0, concurrentRooms);
+        log(`Running batch: rooms [${batch.join(', ')}]`, 'info');
+        await Promise.allSettled(batch.map(id => runRoomSession(id, playersPerRoom, joinDelay)));
       }
 
       testRunning = false;
       document.getElementById('startBtn').disabled = false;
       document.getElementById('stopBtn').disabled = false;
       
-      log(`Simple test completed! ${stats.fullRooms}/${stats.totalRooms} rooms full`, 'info');
+      const successRate = Math.round((stats.fullRooms / stats.totalRooms) * 100);
+      log(`✅ Test complete! ${stats.fullRooms}/${stats.totalRooms} rooms full | ${stats.joinedUsers}/${stats.totalUsers} users joined | ${successRate}% success`, 'success');
     }
 
     function stopTest() {
