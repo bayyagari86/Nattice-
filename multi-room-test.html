@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Room Test - 120 Users, 20 Games</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0e14;
+      color: #c8d3e8;
+      padding: 20px;
+      margin: 0;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a2332 0%, #0d1219 100%);
+      padding: 30px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      border: 2px solid #d4af37;
+    }
+    h1 {
+      margin: 0;
+      color: #d4af37;
+      font-size: 28px;
+    }
+    .controls {
+      background: #1a2332;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      border: 1px solid #2a3342;
+    }
+    input, button, select {
+      padding: 10px;
+      margin: 5px;
+      font-size: 14px;
+      background: #0f1520;
+      border: 1px solid #2a3342;
+      color: #c8d3e8;
+      border-radius: 6px;
+    }
+    button {
+      background: #d4af37;
+      border: none;
+      color: #0d1219;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover { background: #e8c55b; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #1a2332;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid #2a3342;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #d4af37;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #8b9dc3;
+      text-transform: uppercase;
+    }
+    .log {
+      background: #0f1520;
+      padding: 15px;
+      border-radius: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #2a3342;
+      font-family: 'Courier New', monospace;
+    }
+    .log-success { color: #4ade80; }
+    .log-error { color: #f87171; }
+    .log-info { color: #60a5fa; }
+    .log-warning { color: #fbbf24; }
+    .games-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    .game-card {
+      background: #1a2332;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #2a3342;
+    }
+    .game-card.hosting { border-color: #fbbf24; }
+    .game-card.active { border-color: #4ade80; }
+    .game-card.completed { border-color: #d4af37; }
+    .game-card.failed { border-color: #f87171; }
+    .game-title {
+      font-weight: bold;
+      color: #d4af37;
+      margin-bottom: 10px;
+    }
+    .game-detail {
+      font-size: 11px;
+      color: #8b9dc3;
+      margin: 3px 0;
+    }
+    .progress-bar {
+      background: #0f1520;
+      border-radius: 10px;
+      height: 30px;
+      margin: 20px 0;
+      overflow: hidden;
+      border: 1px solid #2a3342;
+    }
+    .progress-fill {
+      background: linear-gradient(90deg, #d4af37 0%, #e8c55b 100%);
+      height: 100%;
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #0d1219;
+      font-weight: bold;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🎮 Multi-Room Test - 120 Users, 20 Games</h1>
+    <p style="margin: 10px 0 0 0; color: #8b9dc3;">Host 20 games simultaneously with 6 players each (120 total users)</p>
+  </div>
+
+  <div class="controls">
+    <h3 style="color: #d4af37; margin-top: 0;">Test Configuration</h3>
+    
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Number of Games:</label>
+      <input type="number" id="gameCount" value="20" min="1" max="50" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(6 players per game = <span id="totalUsersCalc">120</span> users)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Concurrent Games:</label>
+      <input type="number" id="concurrentGames" value="5" min="1" max="10" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Games hosted simultaneously)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Join Delay (ms):</label>
+      <input type="number" id="joinDelay" value="1500" min="500" max="5000" step="500" style="width: 100px;">
+      <span style="color: #8b9dc3; font-size: 12px;">(Delay between player joins)</span>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <label style="display: inline-block; width: 150px;">Window Type:</label>
+      <select id="windowType">
+        <option value="popup">Popup Windows</option>
+        <option value="tab">New Tabs</option>
+        <option value="hidden">Hidden (Background)</option>
+      </select>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <button onclick="startMultiRoomTest()" id="startBtn">🚀 Start Multi-Room Test</button>
+      <button onclick="stopTest()" id="stopBtn" disabled>⏹️ Stop Test</button>
+      <button onclick="closeAllWindows()">🗑️ Close All Windows</button>
+      <button onclick="clearResults()">📋 Clear Results</button>
+    </div>
+  </div>
+
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressBar" style="width: 0%">0%</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Games</div>
+      <div class="stat-value" id="totalGames">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Hosting</div>
+      <div class="stat-value" id="hostingGames" style="color: #fbbf24;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active</div>
+      <div class="stat-value" id="activeGames" style="color: #4ade80;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Completed</div>
+      <div class="stat-value" id="completedGames" style="color: #d4af37;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed</div>
+      <div class="stat-value" id="failedGames" style="color: #f87171;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Users</div>
+      <div class="stat-value" id="totalUsers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Joined Users</div>
+      <div class="stat-value" id="joinedUsers" style="color: #60a5fa;">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value" id="successRate">0%</div>
+    </div>
+  </div>
+
+  <h3 style="color: #d4af37;">Game Sessions</h3>
+  <div class="games-grid" id="gamesGrid"></div>
+
+  <h3 style="color: #d4af37; margin-top: 30px;">Test Log</h3>
+  <div class="log" id="logContainer"></div>
+
+  <script>
+    let testRunning = false;
+    let games = [];
+    let windows = [];
+    let stats = {
+      totalGames: 0,
+      hostingGames: 0,
+      activeGames: 0,
+      completedGames: 0,
+      failedGames: 0,
+      totalUsers: 0,
+      joinedUsers: 0
+    };
+
+    // Update user count calculation
+    document.getElementById('gameCount').addEventListener('input', (e) => {
+      document.getElementById('totalUsersCalc').textContent = e.target.value * 6;
+    });
+
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('logContainer');
+      const time = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-${type}`;
+      entry.textContent = `[${time}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function updateStats() {
+      document.getElementById('totalGames').textContent = stats.totalGames;
+      document.getElementById('hostingGames').textContent = stats.hostingGames;
+      document.getElementById('activeGames').textContent = stats.activeGames;
+      document.getElementById('completedGames').textContent = stats.completedGames;
+      document.getElementById('failedGames').textContent = stats.failedGames;
+      document.getElementById('totalUsers').textContent = stats.totalUsers;
+      document.getElementById('joinedUsers').textContent = stats.joinedUsers;
+      
+      const successRate = stats.totalGames > 0 
+        ? Math.round((stats.completedGames / stats.totalGames) * 100) 
+        : 0;
+      document.getElementById('successRate').textContent = successRate + '%';
+      
+      const progress = stats.totalGames > 0 
+        ? Math.round(((stats.completedGames + stats.failedGames) / stats.totalGames) * 100) 
+        : 0;
+      document.getElementById('progressBar').style.width = progress + '%';
+      document.getElementById('progressBar').textContent = progress + '%';
+    }
+
+    function updateGameCard(gameId, data) {
+      let card = document.getElementById(`game-${gameId}`);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = `game-${gameId}`;
+        card.className = 'game-card';
+        document.getElementById('gamesGrid').appendChild(card);
+      }
+      
+      card.className = `game-card ${data.status}`;
+      card.innerHTML = `
+        <div class="game-title">Game #${gameId} - ${data.roomCode || '...'}</div>
+        <div class="game-detail">Status: ${data.status}</div>
+        <div class="game-detail">Host: ${data.host || '...'}</div>
+        <div class="game-detail">Players: ${data.players}/6</div>
+        <div class="game-detail">Seats: ${data.seats || '...'}</div>
+        <div class="game-detail">Time: ${data.time || '...'}</div>
+        ${data.error ? `<div class="game-detail" style="color: #f87171;">Error: ${data.error}</div>` : ''}
+      `;
+    }
+
+    async function hostGame(gameId) {
+      const gameName = `Game${gameId}`;
+      
+      try {
+        log(`Hosting game ${gameId}...`, 'info');
+        updateGameCard(gameId, { status: 'hosting', players: 0 });
+
+        // Open host window
+        const hostUrl = `http://localhost:3000?mode=host&auto=true&game=${gameId}`;
+        
+        let hostWindow;
+        const windowType = document.getElementById('windowType').value;
+        
+        if (windowType === 'popup') {
+          const width = 500;
+          const height = 700;
+          const left = 50 + (gameId % 5) * 550;
+          const top = 50 + Math.floor(gameId / 5) * 750;
+          hostWindow = window.open(hostUrl, `host${gameId}`, 
+            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`);
+        } else if (windowType === 'tab') {
+          hostWindow = window.open(hostUrl, `_blank`);
+        } else {
+          // Hidden - open in background
+          hostWindow = window.open(hostUrl, `_blank`, 'width=1,height=1,left=-1000,top=-1000');
+        }
+
+        if (!hostWindow) {
+          throw new Error('Popup blocked - please allow popups');
+        }
+
+        windows.push({ id: `host-${gameId}`, window: hostWindow, type: 'host' });
+        stats.hostingGames++;
+        updateStats();
+        updateGameCard(gameId, { status: 'hosting', players: 0 });
+
+        // Wait for host to initialize
+        const hostResult = await new Promise((resolve, reject) => {
+          const checkInterval = setInterval(() => {
+            try {
+              if (hostWindow.closed) {
+                clearInterval(checkInterval);
+                reject(new Error('Host window closed'));
+                return;
+              }
+
+              const result = hostWindow.hostResult;
+              if (result) {
+                clearInterval(checkInterval);
+                resolve(result);
+              }
+            } catch (e) {
+              clearInterval(checkInterval);
+              reject(e);
+            }
+          }, 1000);
+
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error('Host init timeout'));
+          }, 15000);
+        });
+
+        stats.hostingGames--;
+        stats.activeGames++;
+        updateStats();
+        
+        log(`Game ${gameId} hosted successfully - Room: ${hostResult.roomCode}, Host: ${hostResult.hostId}`, 'success');
+        updateGameCard(gameId, { 
+          status: 'active', 
+          roomCode: hostResult.roomCode,
+          host: hostResult.hostId.substring(0, 12) + '...',
+          players: 1,
+          seats: '0'
+        });
+
+        return hostResult;
+
+      } catch (err) {
+        stats.hostingGames--;
+        stats.failedGames++;
+        updateStats();
+        
+        log(`Game ${gameId} failed to host: ${err.message}`, 'error');
+        updateGameCard(gameId, { 
+          status: 'failed', 
+          error: err.message 
+        });
+        throw err;
+      }
+    }
+
+    async function joinGame(gameId, hostId, roomCode, playerIndex) {
+      const userName = `G${gameId}P${playerIndex}`;
+      
+      try {
+        log(`Joining game ${gameId} as ${userName}...`, 'info');
+
+        // Open join window
+        const joinUrl = `http://localhost:3000?host=${hostId}&room=${roomCode}&auto=true&user=${userName}`;
+        
+        let joinWindow;
+        const windowType = document.getElementById('windowType').value;
+        
+        if (windowType === 'popup') {
+          const width = 400;
+          const height = 600;
+          const left = 100 + (gameId % 5) * 450 + playerIndex * 50;
+          const top = 100 + Math.floor(gameId / 5) * 650;
+          joinWindow = window.open(joinUrl, `user${gameId}_${playerIndex}`, 
+            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`);
+        } else if (windowType === 'tab') {
+          joinWindow = window.open(joinUrl, `_blank`);
+        } else {
+          joinWindow = window.open(joinUrl, `_blank`, 'width=1,height=1,left=-1000,top=-1000');
+        }
+
+        if (!joinWindow) {
+          throw new Error('Popup blocked - please allow popups');
+        }
+
+        windows.push({ id: `user-${gameId}-${playerIndex}`, window: joinWindow, type: 'join' });
+
+        // Wait for join
+        const joinResult = await new Promise((resolve, reject) => {
+          const checkInterval = setInterval(() => {
+            try {
+              if (joinWindow.closed) {
+                clearInterval(checkInterval);
+                reject(new Error('Join window closed'));
+                return;
+              }
+
+              const result = joinWindow.autoJoinResult;
+              if (result) {
+                clearInterval(checkInterval);
+                if (result.success) {
+                  resolve(result);
+                } else {
+                  reject(new Error(result.error || 'Join failed'));
+                }
+              }
+            } catch (e) {
+              clearInterval(checkInterval);
+              reject(e);
+            }
+          }, 1000);
+
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error('Join timeout'));
+          }, 20000);
+        });
+
+        stats.joinedUsers++;
+        updateStats();
+        
+        log(`${userName} joined game ${gameId} - Seat ${joinResult.seat}`, 'success');
+        return joinResult.seat;
+
+      } catch (err) {
+        log(`${userName} failed to join game ${gameId}: ${err.message}`, 'error');
+        throw err;
+      }
+    }
+
+    async function runGameSession(gameId, concurrentLimit) {
+      const startTime = Date.now();
+      
+      try {
+        // Host the game
+        const hostResult = await hostGame(gameId);
+        const { hostId, roomCode } = hostResult;
+        
+        // Join 5 players
+        const joinDelay = parseInt(document.getElementById('joinDelay').value);
+        const seats = [];
+        
+        for (let i = 1; i <= 5; i++) {
+          try {
+            const seat = await joinGame(gameId, hostId, roomCode, i);
+            seats.push(seat);
+            
+            if (i < 5) {
+              await new Promise(resolve => setTimeout(resolve, joinDelay));
+            }
+          } catch (err) {
+            log(`Player ${i} join failed for game ${gameId}: ${err.message}`, 'error');
+          }
+        }
+
+        const gameTime = Date.now() - startTime;
+        stats.activeGames--;
+        stats.completedGames++;
+        updateStats();
+        
+        updateGameCard(gameId, { 
+          status: 'completed',
+          roomCode,
+          host: hostId.substring(0, 12) + '...',
+          players: 1 + seats.length,
+          seats: seats.join(','),
+          time: Math.round(gameTime / 1000) + 's'
+        });
+        
+        log(`Game ${gameId} completed in ${Math.round(gameTime / 1000)}s - ${seats.length + 1}/6 players joined`, 'success');
+
+      } catch (err) {
+        stats.activeGames--;
+        stats.failedGames++;
+        updateStats();
+        
+        updateGameCard(gameId, { 
+          status: 'failed',
+          error: err.message
+        });
+        
+        log(`Game ${gameId} failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function startMultiRoomTest() {
+      const gameCount = parseInt(document.getElementById('gameCount').value);
+      const concurrentGames = parseInt(document.getElementById('concurrentGames').value);
+
+      testRunning = true;
+      document.getElementById('startBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+
+      stats.totalGames = gameCount;
+      stats.totalUsers = gameCount * 6;
+      updateStats();
+
+      log(`Starting multi-room test: ${gameCount} games, ${gameCount * 6} users`, 'info');
+      log(`Concurrent games: ${concurrentGames}`, 'info');
+
+      const gameQueue = [];
+      for (let i = 1; i <= gameCount; i++) {
+        gameQueue.push(i);
+      }
+
+      while (gameQueue.length > 0 && testRunning) {
+        const batch = [];
+        const batchSize = Math.min(concurrentGames, gameQueue.length);
+        
+        for (let i = 0; i < batchSize; i++) {
+          const gameId = gameQueue.shift();
+          batch.push(runGameSession(gameId, concurrentGames));
+        }
+
+        await Promise.allSettled(batch);
+      }
+
+      testRunning = false;
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = false;
+      
+      log(`Multi-room test completed! ${stats.completedGames}/${stats.totalGames} games successful`, 'info');
+    }
+
+    function stopTest() {
+      testRunning = false;
+      log('Test stopped by user', 'warning');
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+    }
+
+    function closeAllWindows() {
+      windows.forEach(({ window, id }) => {
+        try {
+          if (!window.closed) {
+            window.close();
+          }
+        } catch (e) {
+          log(`Failed to close window ${id}: ${e.message}`, 'error');
+        }
+      });
+      windows = [];
+      log('All windows closed', 'info');
+    }
+
+    function clearResults() {
+      windows = [];
+      games = [];
+      stats = {
+        totalGames: 0,
+        hostingGames: 0,
+        activeGames: 0,
+        completedGames: 0,
+        failedGames: 0,
+        totalUsers: 0,
+        joinedUsers: 0
+      };
+      updateStats();
+      document.getElementById('logContainer').innerHTML = '';
+      document.getElementById('gamesGrid').innerHTML = '';
+      log('Results cleared', 'info');
+    }
+
+    window.addEventListener('beforeunload', () => {
+      closeAllWindows();
+    });
+  </script>
+</body>
+</html>

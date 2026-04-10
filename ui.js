@@ -59,13 +59,35 @@ const UI = (() => {
       };
     }
 
-    // Check for QR code join params in URL
+    // Check for automation params
     const urlParams = new URLSearchParams(window.location.search);
+    const auto = urlParams.get('auto');
+    const mode = urlParams.get('mode');
+    const gameNum = urlParams.get('game');
+    
+    // Auto-host for multi-room testing
+    if (auto === 'true' && mode === 'host') {
+      const hostName = gameNum ? `Host${gameNum}` : 'AutoHost';
+      showToast(`Auto-hosting as ${hostName}...`);
+      setTimeout(() => {
+        Game.hostGame(hostName)
+          .then(roomCode => {
+            const hostId = Network.getPeerId();
+            window.hostResult = { success: true, roomCode, hostId };
+            console.log(`Auto-hosted: Room ${roomCode}, Host ${hostId}`);
+          })
+          .catch(err => {
+            window.hostResult = { success: false, error: err.message };
+            console.error('Auto-host failed:', err);
+          });
+      }, 800);
+      return;
+    }
+
+    // Check for QR code join params in URL
     const qrHost = urlParams.get('host');
     const qrRoom = urlParams.get('room');
-    const auto = urlParams.get('auto');
     const userName = urlParams.get('user');
-    const mode = urlParams.get('mode');
     
     if (qrHost && qrRoom) {
       // Auto-join for browser automation
