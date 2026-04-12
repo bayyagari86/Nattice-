@@ -556,7 +556,7 @@ const UI = (() => {
           const idx = parseInt(btn.dataset.idx);
           const reaction = el._odiaReactions[idx];
           if (!reaction) return;
-          showEmojiReaction(mySeat, reaction.phrase);
+          broadcastEmojiReaction(reaction.phrase);
           try { Game.sendChat(reaction.chat); } catch(ex) {}
         });
       });
@@ -1008,14 +1008,21 @@ const UI = (() => {
   }
 
   // === EMOJI REACTIONS ===
-  function showEmojiReaction(seat, emoji) {
-    const floatEl = document.getElementById(`reaction-float-${seat}`);
-    if (!floatEl) return;
-    floatEl.textContent = emoji;
-    floatEl.classList.remove('active');
-    void floatEl.offsetWidth;
-    floatEl.classList.add('active');
-    setTimeout(() => floatEl.classList.remove('active'), 1800);
+  function showEmojiReaction(emoji) {
+    const centerEl = document.getElementById('center-emoji');
+    if (!centerEl) return;
+    centerEl.textContent = emoji;
+    centerEl.classList.remove('active');
+    void centerEl.offsetWidth;
+    centerEl.classList.add('active');
+    setTimeout(() => centerEl.classList.remove('active'), 2000);
+  }
+
+  function broadcastEmojiReaction(emoji) {
+    showEmojiReaction(emoji);
+    if (Game && Game.broadcastEmoji) {
+      Game.broadcastEmoji(emoji);
+    }
   }
 
   // === CHAT ===

@@ -387,6 +387,14 @@ const Game = (() => {
       case 'NO_RAISE':
         handleNoRaise(fromPeer);
         break;
+      case 'CHAT':
+        UI.addChatMessage(msg.name, msg.text);
+        Network.broadcast(msg); // Relay to all other players
+        break;
+      case 'EMOJI_REACTION':
+        UI.showEmojiReaction(msg.emoji);
+        Network.broadcast(msg); // Relay to all other players
+        break;
     }
   }
 
@@ -489,6 +497,9 @@ const Game = (() => {
         break;
       case 'CHAT':
         UI.addChatMessage(msg.name, msg.text);
+        break;
+      case 'EMOJI_REACTION':
+        UI.showEmojiReaction(msg.emoji);
         break;
     }
   }
@@ -1239,17 +1250,35 @@ const Game = (() => {
     const hand = state.hands[seat];
     const eval_ = aiEvalHand(hand);
 
+    // Determine if we're in raise phase (after 5 tricks, only winning team can raise)
+    const isRaisePhase = state.phase === 'RAISE_CHECK';
+    const tricksPlayed = state.currentRound.tricksPlayed || 0;
+    const biddingTeam = state.currentRound.biddingTeam;
+    const myTeam = Engine.getTeam(seat);
+    const isWinningTeam = state.currentRound.tricksTaken[biddingTeam] >= tricksPlayed;
+
+    // Max bid depends on phase: 5 for initial, up to 9 for raise if winning team
+    const maxBid = isRaisePhase ? (isWinningTeam && myTeam === biddingTeam ? 9 : state.currentRound.bid) : 5;
+
     let bid;
-    if (eval_.strength >= 8) {
-      bid = Math.min(9, Math.max(7, state.currentRound.bid + 1));
-    } else if (eval_.strength >= 6) {
-      bid = Math.min(7, Math.max(6, state.currentRound.bid + 1));
-    } else if (eval_.strength >= 4.5) {
-      bid = Math.max(5, state.currentRound.bid + 1);
-    } else if (eval_.strength >= 3 && state.currentRound.bid < 5) {
-      bid = 5;
+    if (isRaisePhase) {
+      // In raise phase, only raise if we're winning team and confident
+      if (isWinningTeam && myTeam === biddingTeam && eval_.strength >= 6) {
+        bid = Math.min(maxBid, state.currentRound.bid + 1);
+      } else {
+        bid = 0; // Pass in raise phase unless conditions met
+      }
     } else {
-      bid = 0; // Pass
+      // Initial bidding: conservative, max 5
+      if (eval_.strength >= 6 && state.currentRound.bid < 5) {
+        bid = Math.min(maxBid, state.currentRound.bid + 1);
+      } else if (eval_.strength >= 4 && state.currentRound.bid < 5) {
+        bid = Math.min(maxBid, Math.max(5, state.currentRound.bid + 1));
+      } else if (eval_.strength >= 3 && state.currentRound.bid < 5) {
+        bid = 5;
+      } else {
+        bid = 0; // Pass
+      }
     }
 
     if (bid > 9) bid = 0; // Can't bid higher than 9
@@ -1695,6 +1724,15 @@ const Game = (() => {
     }
   }
 
+  // Broadcast emoji reaction to all players
+  function broadcastEmoji(emoji) {
+    if (!isSoloMode) {
+      const msg = { type: 'EMOJI_REACTION', emoji };
+      Network.broadcast(msg);
+    }
+    UI.showEmojiReaction(emoji);
+  }
+
   // Sanitize state before sending (hide other players' hands)
   function sanitizeStateForClient(s) {
     const clean = JSON.parse(JSON.stringify(s));
@@ -1735,7 +1773,7 @@ const Game = (() => {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam,
     makeBid, selectTrump, playCard,
-    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat,
+    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji,
     stopAINameRotation,
   };
 })();
