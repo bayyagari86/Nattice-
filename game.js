@@ -166,7 +166,8 @@ const Game = (() => {
     state = Engine.createGameState();
     roomCode = GameCrypto.generateRoomCode();
 
-    await Network.init();
+    // Use deterministic peer ID based on room code so joiners can find host by room code only
+    await Network.init('TC_' + roomCode);
     myPeerId = Network.getPeerId();
     await Network.createRoom(roomCode);
 
@@ -181,7 +182,7 @@ const Game = (() => {
   }
 
   // Join an existing game
-  async function joinGame(playerName, hostPeerId, code) {
+  async function joinGame(playerName, code) {
     myName = playerName;
     myPlayerId = GameCrypto.generatePlayerId();
     roomCode = code;
@@ -189,15 +190,15 @@ const Game = (() => {
     await Network.init();
     myPeerId = Network.getPeerId();
     
-    // If no host ID provided, try auto-discovery (for now, require host ID)
-    if (!hostPeerId) {
-      throw new Error('Host ID required. Please get it from the host.');
-    }
+    // Derive host peer ID from room code — no host ID entry needed
+    const hostPeerId = 'TC_' + code.toUpperCase();
+    console.log('[Game] Joining room', code, '→ host peer ID:', hostPeerId);
     
     await Network.joinRoom(hostPeerId, code);
 
     // Send join request to host
-    Network.sendTo(hostPeerId, {
+    const derivedHostPeerId = 'TC_' + code.toUpperCase();
+    Network.sendTo(derivedHostPeerId, {
       type: 'JOIN_REQUEST',
       name: myName,
       playerId: myPlayerId,

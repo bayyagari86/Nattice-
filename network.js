@@ -15,9 +15,9 @@ const Network = (() => {
   let reconnectAttempts = 0;
   const MAX_RECONNECT = 5;
 
-  function init() {
+  function init(customId = null) {
     return new Promise((resolve, reject) => {
-      const id = 'TC_' + GameCrypto.generatePlayerId().substring(0, 12);
+      const id = customId || ('TC_' + GameCrypto.generatePlayerId().substring(0, 12));
       peer = new Peer(id, {
         config: {
           iceServers: [
