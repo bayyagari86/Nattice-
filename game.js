@@ -923,7 +923,6 @@ const Game = (() => {
     } else {
       state.dealer = (state.dealer + 1) % 6;
       state.phase = 'ROUND_END';
-      rotateAINamesBetweenRounds();
       broadcastState();
       // Auto-start next round after delay
       setTimeout(() => {
