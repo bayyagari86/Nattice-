@@ -598,13 +598,15 @@ const UI = (() => {
 
     handEl.innerHTML = '';
     const total = sorted.length;
-    const isMobile = window.innerWidth < 641;
+    const screenW = window.innerWidth;
+    const isMobile = screenW < 641;
+    const isSmallPhone = screenW <= 390; // iPhone SE, Mini, standard 12/13/14
 
-    // Arc parameters
-    const maxAngle = Math.min(4 * (total - 1), 36); // total spread angle in degrees
-    const arcRise = isMobile ? 18 : 0;              // how much middle cards rise (px)
-    const cardW = isMobile ? 62 : 58;
-    const overlap = isMobile ? 20 : 10;             // horizontal overlap between cards
+    // Arc parameters — shrink cards on small phones so 9 cards always fit
+    const maxAngle = Math.min(4 * (total - 1), isSmallPhone ? 30 : 36);
+    const arcRise = isMobile ? (isSmallPhone ? 14 : 18) : 0;
+    const cardW = isMobile ? (isSmallPhone ? 48 : 58) : 58;
+    const overlap = isMobile ? (isSmallPhone ? 22 : 18) : 10;
     const totalWidth = cardW * total - overlap * (total - 1);
     const startX = (handEl.offsetWidth || window.innerWidth) / 2 - totalWidth / 2;
 
