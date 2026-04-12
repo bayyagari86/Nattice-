@@ -209,6 +209,7 @@ const Game = (() => {
   }
 
   let turnTimer = null;
+  let raiseTimer = null;
   const TURN_TIMEOUT_MS = 45000; // 45s before auto-play
   let disconnectedPlayers = new Map(); // peerId -> { seat, name, playerId, hand }
 
@@ -294,6 +295,22 @@ const Game = (() => {
     }
   }
 
+  function startRaiseTimer() {
+    clearRaiseTimer();
+    const timerDuration = state.currentRound.raiseTimer || 20;
+    raiseTimer = setTimeout(() => {
+      console.log('[Host] Raise timer expired - automatically no raise');
+      processNoRaise();
+    }, timerDuration * 1000);
+  }
+
+  function clearRaiseTimer() {
+    if (raiseTimer) {
+      clearTimeout(raiseTimer);
+      raiseTimer = null;
+    }
+  }
+
   function setupClientListeners() {
     Network.onMessage((fromPeer, msg) => {
       handleClientMessage(fromPeer, msg);
@@ -340,6 +357,7 @@ const Game = (() => {
 
   function cleanup() {
     clearTurnTimer();
+    clearRaiseTimer();
     Network.stopHeartbeat();
     Network.destroy();
     state = null;
@@ -969,6 +987,10 @@ const Game = (() => {
               // AI teammates suggest their capability
               setTimeout(() => aiSuggestRaiseCommitment(), 1000);
             }
+            // Start the countdown timer
+            if (Network.getIsHost() || isSoloMode) {
+              startRaiseTimer();
+            }
             return;
           }
         }
@@ -1086,11 +1108,13 @@ const Game = (() => {
   }
 
   function processNoRaise() {
+    clearRaiseTimer();
     UI.showToast('Bid not raised');
     resumeAfterRaise();
   }
 
   function processRaise(newBid) {
+    clearRaiseTimer();
     if (newBid > state.currentRound.bid && newBid <= 9) {
       state.currentRound.bid = newBid;
       state.currentRound.raised = true;
