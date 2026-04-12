@@ -1257,27 +1257,41 @@ const Game = (() => {
     const myTeam = Engine.getTeam(seat);
     const isWinningTeam = state.currentRound.tricksTaken[biddingTeam] >= tricksPlayed;
 
-    // Max bid depends on phase: 5 for initial, up to 9 for raise if winning team
-    const maxBid = isRaisePhase ? (isWinningTeam && myTeam === biddingTeam ? 9 : state.currentRound.bid) : 5;
-
     let bid;
     if (isRaisePhase) {
-      // In raise phase, only raise if we're winning team and confident
-      if (isWinningTeam && myTeam === biddingTeam && eval_.strength >= 6) {
-        bid = Math.min(maxBid, state.currentRound.bid + 1);
-      } else {
-        bid = 0; // Pass in raise phase unless conditions met
-      }
-    } else {
-      // Initial bidding: conservative, max 5
-      if (eval_.strength >= 6 && state.currentRound.bid < 5) {
-        bid = Math.min(maxBid, state.currentRound.bid + 1);
-      } else if (eval_.strength >= 4 && state.currentRound.bid < 5) {
-        bid = Math.min(maxBid, Math.max(5, state.currentRound.bid + 1));
-      } else if (eval_.strength >= 3 && state.currentRound.bid < 5) {
-        bid = 5;
+      // Raise phase only after 5 tricks, only winning team can raise
+      if (tricksPlayed >= 5 && isWinningTeam && myTeam === biddingTeam && eval_.strength >= 6) {
+        bid = Math.min(9, state.currentRound.bid + 1);
       } else {
         bid = 0; // Pass
+      }
+    } else {
+      // Initial bidding: 5-7 normally, 8-9 only for very strong hands
+      const currentBid = state.currentRound.bid;
+      const hasLongSuit = Object.values(eval_.suitCounts).some(c => c >= 5);
+      const hasHighCards = eval_.strength >= 7;
+      const hasJokers = hand.some(c => c.id === 'BIG_JOKER' || c.id === 'SMALL_JOKER');
+
+      // First bid: 5-7 normally
+      if (currentBid === 0) {
+        if (eval_.strength >= 5 && hasLongSuit && hasJokers) {
+          bid = 7; // Strong hand, bid 7
+        } else if (eval_.strength >= 4) {
+          bid = 5 + Math.floor(Math.random() * 2); // 5 or 6
+        } else if (eval_.strength >= 3) {
+          bid = 5;
+        } else {
+          bid = 0; // Pass
+        }
+      } else {
+        // Raising during initial phase: only to 8-9 if very strong
+        if (currentBid < 7 && eval_.strength >= 5) {
+          bid = currentBid + 1;
+        } else if (currentBid >= 7 && currentBid < 9 && hasLongSuit && hasHighCards && hasJokers) {
+          bid = currentBid + 1; // Only 8-9 for very strong hands
+        } else {
+          bid = 0; // Pass
+        }
       }
     }
 

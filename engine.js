@@ -193,20 +193,21 @@ const Engine = (() => {
     if (bid === 0) return true; // Pass
     if (bid < 5 || bid > 9) return false;
 
-    // Initial bidding phase: max bid is 5
+    // Initial bidding phase: starts at 5, can go to 6-7 normally, 8-9 for strong hands
     if (phase === 'BIDDING') {
-      if (currentHighBid === 0) return bid >= 5 && bid <= 5; // First bid must be exactly 5
-      return bid > currentHighBid && bid <= 5; // Must beat current bid but not exceed 5
+      if (currentHighBid === 0) return bid >= 5 && bid <= 7; // First bid: 5-7
+      return bid > currentHighBid && bid <= 9; // Can raise to 8-9 if confident
     }
 
-    // Raise phase (RAISE_CHECK): only winning team can raise, up to 9
+    // Raise phase (RAISE_CHECK after 5 tricks): only winning team can raise
     if (phase === 'RAISE_CHECK' && gameState) {
       const biddingTeam = gameState.currentRound?.biddingTeam;
       const tricksPlayed = gameState.currentRound?.tricksPlayed || 0;
       const tricksTaken = gameState.currentRound?.tricksTaken || { A: 0, B: 0 };
       const isWinningTeam = tricksTaken[biddingTeam] >= tricksPlayed;
 
-      // If not winning team, can't raise
+      // Raise option only comes after 5 tricks, and only for winning team
+      if (tricksPlayed < 5) return false;
       if (!isWinningTeam) return false;
 
       // Winning team can raise up to 9
