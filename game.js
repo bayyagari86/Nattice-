@@ -208,6 +208,10 @@ const Game = (() => {
     setupClientListeners();
   }
 
+  let turnTimer = null;
+  const TURN_TIMEOUT_MS = 45000; // 45s before auto-play
+  let disconnectedPlayers = new Map(); // peerId -> { seat, name, playerId, hand }
+
   function setupHostListeners() {
     Network.onMessage((fromPeer, msg) => {
       handleHostMessage(fromPeer, msg);
@@ -215,18 +219,139 @@ const Game = (() => {
 
     Network.onPeerLeave((peerId) => {
       const seat = peerToSeat.get(peerId);
-      if (seat !== undefined && state.players[seat]) {
-        state.players[seat].connected = false;
-        broadcastState();
+      if (seat === undefined || !state.players[seat]) return;
+
+      const player = state.players[seat];
+      console.log(`[Host] Player "${player.name}" (seat ${seat}) disconnected`);
+
+      // Save for possible reconnect
+      disconnectedPlayers.set(player.id, {
+        seat,
+        name: player.name,
+        playerId: player.id,
+        hand: state.hands[seat] ? [...state.hands[seat]] : [],
+      });
+
+      // Convert to AI bot — game continues
+      player.connected = false;
+      player.isAI = true;
+      player.originalName = player.name;
+      player.name = `${player.name} (Bot)`;
+      peerToSeat.delete(peerId);
+      seatToPeer.delete(seat);
+
+      UI.showToast(`${player.originalName} disconnected — Bot taking over`);
+      Network.broadcast({ type: 'PLAYER_LEFT', seat, name: player.originalName });
+      broadcastState();
+
+      // If it was their turn, trigger AI
+      if (state.currentRound && state.currentRound.currentPlayer === seat) {
+        clearTurnTimer();
+        setTimeout(() => checkAITurn(), 1500);
+      }
+
+      // If in lobby, update it
+      if (state.phase === 'WAITING') {
         UI.updateLobby(state, mySeat);
       }
     });
+
+    // Start heartbeat to detect dead connections
+    Network.startHeartbeat();
+  }
+
+  // Turn timeout — auto-play for AFK players
+  function startTurnTimer() {
+    clearTurnTimer();
+    if (!Network.getIsHost() && !isSoloMode) return;
+    turnTimer = setTimeout(() => {
+      if (!state || !state.currentRound) return;
+      const seat = state.currentRound.currentPlayer;
+      const player = state.players[seat];
+      if (!player || player.isAI) return; // AI already handles itself
+      if (seat === mySeat) return; // Don't auto-play for host themselves
+
+      console.log(`[Host] Turn timeout for "${player.name}" (seat ${seat}) — auto-playing`);
+      UI.showToast(`${player.name} took too long — auto-playing`);
+
+      // Convert to temporary AI for this action
+      if (state.phase === 'BIDDING') {
+        aiMakeBid(seat);
+      } else if (state.phase === 'TRUMP_SELECT') {
+        aiSelectTrump(seat);
+      } else if (state.phase === 'PLAYING') {
+        aiPlayCard(seat);
+      } else if (state.phase === 'RAISE_CHECK') {
+        aiHandleRaise(seat);
+      }
+    }, TURN_TIMEOUT_MS);
+  }
+
+  function clearTurnTimer() {
+    if (turnTimer) {
+      clearTimeout(turnTimer);
+      turnTimer = null;
+    }
   }
 
   function setupClientListeners() {
     Network.onMessage((fromPeer, msg) => {
       handleClientMessage(fromPeer, msg);
     });
+
+    // Detect host going away
+    const hostPeerId = 'TC_' + roomCode.toUpperCase();
+    Network.onPeerLeave((peerId) => {
+      if (peerId === hostPeerId) {
+        console.error('[Client] Host disconnected!');
+        UI.showToast('Host disconnected — game ended');
+        setTimeout(() => {
+          UI.showScreen('title-screen');
+          cleanup();
+        }, 2500);
+      }
+    });
+
+    // Detect signaling server lost
+    Network.onDisconnected((reason) => {
+      console.warn('[Client] Network disconnected:', reason);
+      UI.showToast('Connection lost — trying to reconnect...');
+    });
+
+    // Handle mobile browser going to background
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      console.log('[Game] App went to background');
+    } else {
+      console.log('[Game] App returned to foreground');
+      // Re-render UI in case state changed while backgrounded
+      if (state && mySeat >= 0) {
+        if (state.phase === 'WAITING') {
+          UI.updateLobby(state, mySeat);
+        } else {
+          UI.updateAll(state, mySeat);
+        }
+      }
+    }
+  }
+
+  function cleanup() {
+    clearTurnTimer();
+    Network.stopHeartbeat();
+    Network.destroy();
+    state = null;
+    mySeat = -1;
+    myPlayerId = null;
+    myPeerId = null;
+    roomCode = '';
+    peerToSeat.clear();
+    seatToPeer.clear();
+    disconnectedPlayers.clear();
+    isSoloMode = false;
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   }
 
   // HOST message handling
@@ -234,6 +359,9 @@ const Game = (() => {
     switch (msg.type) {
       case 'JOIN_REQUEST':
         handleJoinRequest(fromPeer, msg);
+        break;
+      case 'REJOIN_REQUEST':
+        handleRejoinRequest(fromPeer, msg);
         break;
       case 'BID':
         handleBid(fromPeer, msg);
@@ -341,6 +469,24 @@ const Game = (() => {
           UI.showRaisePrompt(state);
         }
         break;
+      case 'ERROR':
+        UI.showToast(msg.message || 'An error occurred');
+        UI.showScreen('title-screen');
+        cleanup();
+        break;
+      case 'PLAYER_LEFT':
+        UI.showToast(`${msg.name} disconnected — Bot taking over`);
+        break;
+      case 'PLAYER_REJOINED':
+        UI.showToast(`${msg.name} reconnected!`);
+        break;
+      case 'HOST_CLOSED':
+        UI.showToast('Host closed the game');
+        setTimeout(() => {
+          UI.showScreen('title-screen');
+          cleanup();
+        }, 2000);
+        break;
       case 'CHAT':
         UI.addChatMessage(msg.name, msg.text);
         break;
@@ -349,7 +495,38 @@ const Game = (() => {
 
   function handleJoinRequest(fromPeer, msg) {
     console.log('[Host] Join request from:', msg.name, 'peerId:', fromPeer);
-    
+
+    // Check for duplicate — same peer already seated
+    const existingSeat = peerToSeat.get(fromPeer);
+    if (existingSeat !== undefined) {
+      console.log('[Host] Duplicate join from', fromPeer, '— already at seat', existingSeat);
+      const seatToPeerObj = {};
+      for (const [s, p] of seatToPeer) seatToPeerObj[s] = p;
+      Network.sendTo(fromPeer, {
+        type: 'SEAT_ASSIGNED', seat: existingSeat,
+        state: sanitizeStateForClient(state), seatToPeer: seatToPeerObj,
+      });
+      return;
+    }
+
+    // Check for reconnecting player (same playerId)
+    const dcInfo = disconnectedPlayers.get(msg.playerId);
+    if (dcInfo) {
+      console.log('[Host] Reconnecting player', msg.name, 'to seat', dcInfo.seat);
+      handleRejoinRequest(fromPeer, { ...msg, originalSeat: dcInfo.seat });
+      return;
+    }
+
+    // Check if player name already exists (prevent accidental double-join)
+    for (let i = 0; i < 6; i++) {
+      const p = state.players[i];
+      if (p && !p.isAI && p.connected && p.name === msg.name) {
+        console.log('[Host] Player name already in game:', msg.name);
+        Network.sendTo(fromPeer, { type: 'ERROR', message: 'A player with that name is already in the game' });
+        return;
+      }
+    }
+
     // Find next available seat
     let seat = -1;
     for (let i = 0; i < 6; i++) {
@@ -403,6 +580,60 @@ const Game = (() => {
       UI.showToast('All 6 players joined! Starting game...');
       setTimeout(() => startGame(), 2000);
     }
+  }
+
+  // Handle player reconnecting to their old seat
+  function handleRejoinRequest(fromPeer, msg) {
+    const seat = msg.originalSeat;
+    const player = state.players[seat];
+    if (!player) {
+      Network.sendTo(fromPeer, { type: 'ERROR', message: 'Seat no longer exists' });
+      return;
+    }
+
+    console.log('[Host] Restoring', msg.name, 'to seat', seat);
+
+    // Restore player from AI bot
+    player.name = msg.name;
+    player.peerId = fromPeer;
+    player.connected = true;
+    player.isAI = false;
+    delete player.originalName;
+
+    peerToSeat.set(fromPeer, seat);
+    seatToPeer.set(seat, fromPeer);
+    disconnectedPlayers.delete(msg.playerId);
+
+    // Restore their hand if available
+    const dcInfo = disconnectedPlayers.get(msg.playerId);
+    if (dcInfo && dcInfo.hand && dcInfo.hand.length > 0) {
+      state.hands[seat] = dcInfo.hand;
+    }
+
+    // Send seat assignment with current state
+    const seatToPeerObj = {};
+    for (const [s, p] of seatToPeer) seatToPeerObj[s] = p;
+
+    Network.sendTo(fromPeer, {
+      type: 'SEAT_ASSIGNED',
+      seat,
+      state: sanitizeStateForClient(state),
+      seatToPeer: seatToPeerObj,
+    });
+
+    // Also send their hand privately
+    if (state.hands[seat] && state.hands[seat].length > 0) {
+      Network.sendTo(fromPeer, {
+        type: 'DEAL_HAND',
+        state: sanitizeStateForClient(state),
+        hand: state.hands[seat],
+      });
+    }
+
+    // Notify everyone
+    Network.broadcast({ type: 'PLAYER_REJOINED', seat, name: msg.name });
+    UI.showToast(`${msg.name} reconnected to Seat ${seat + 1}!`);
+    broadcastState();
   }
 
   // Start the game (host only)
@@ -933,12 +1164,18 @@ const Game = (() => {
     }
   }
 
-  // AI Logic
+  // AI Logic + turn timeout for human players
   function checkAITurn() {
     if (!isSoloMode && !Network.getIsHost()) return;
+    clearTurnTimer();
     const currentSeat = state.currentRound.currentPlayer;
     const player = state.players[currentSeat];
-    if (!player || !player.isAI) return;
+    if (!player) return;
+    // If human player (not AI, not host), start turn timeout
+    if (!player.isAI) {
+      if (currentSeat !== mySeat) startTurnTimer();
+      return;
+    }
 
     // Different delays for different phases
     let delay;
@@ -1475,8 +1712,27 @@ const Game = (() => {
     Network.broadcast({ type: 'STATE_UPDATE', state: cleanState });
   }
 
+  // Graceful leave — notify peers before closing
+  function leaveGame() {
+    if (Network.getIsHost()) {
+      Network.broadcast({ type: 'HOST_CLOSED' });
+    }
+    cleanup();
+    UI.showScreen('title-screen');
+  }
+
+  // Browser close / navigate away — best-effort notify
+  window.addEventListener('beforeunload', () => {
+    if (state && Network.getPeerId()) {
+      if (Network.getIsHost()) {
+        try { Network.broadcast({ type: 'HOST_CLOSED' }); } catch(e) {}
+      }
+      Network.destroy();
+    }
+  });
+
   return {
-    hostGame, joinGame, startGame, startSoloGame,
+    hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam,
     makeBid, selectTrump, playCard,
     raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat,

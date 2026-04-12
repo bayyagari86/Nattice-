@@ -12,8 +12,13 @@ const Network = (() => {
   let onPeerJoinCallback = null;
   let onPeerLeaveCallback = null;
   let onConnectedCallback = null;
+  let onDisconnectedCallback = null;
   let reconnectAttempts = 0;
   const MAX_RECONNECT = 5;
+  let heartbeatInterval = null;
+  const HEARTBEAT_MS = 5000;
+  const HEARTBEAT_TIMEOUT_MS = 12000;
+  const lastPong = new Map(); // peerId -> timestamp
 
   function init(customId = null) {
     return new Promise((resolve, reject) => {
@@ -55,7 +60,14 @@ const Network = (() => {
         if (reconnectAttempts < MAX_RECONNECT) {
           reconnectAttempts++;
           setTimeout(() => peer.reconnect(), 2000);
+        } else if (onDisconnectedCallback) {
+          onDisconnectedCallback('signaling_lost');
         }
+      });
+
+      peer.on('close', () => {
+        console.warn('[Network] Peer destroyed');
+        stopHeartbeat();
       });
     });
   }
@@ -63,6 +75,7 @@ const Network = (() => {
   function setupConnection(conn) {
     conn.on('open', () => {
       connections.set(conn.peer, conn);
+      lastPong.set(conn.peer, Date.now());
       console.log('[Network] Peer connected:', conn.peer);
       if (onPeerJoinCallback) onPeerJoinCallback(conn.peer);
     });
@@ -71,8 +84,15 @@ const Network = (() => {
       try {
         // Promote this connection — it delivered data successfully
         connections.set(conn.peer, conn);
+        lastPong.set(conn.peer, Date.now());
         const decrypted = roomKey ? await GameCrypto.decrypt(data, roomKey) : data;
         const msg = JSON.parse(decrypted);
+        // Handle heartbeat internally
+        if (msg.type === '__PING__') {
+          sendTo(conn.peer, { type: '__PONG__' });
+          return;
+        }
+        if (msg.type === '__PONG__') return;
         if (onMessageCallback) onMessageCallback(conn.peer, msg);
       } catch (e) {
         console.error('[Network] Decrypt/parse failed:', e);
@@ -81,6 +101,7 @@ const Network = (() => {
 
     conn.on('close', () => {
       connections.delete(conn.peer);
+      lastPong.delete(conn.peer);
       console.log('[Network] Peer disconnected:', conn.peer);
       if (onPeerLeaveCallback) onPeerLeaveCallback(conn.peer);
     });
@@ -92,8 +113,38 @@ const Network = (() => {
     // If already open (e.g. called after open event), store immediately
     if (conn.open) {
       connections.set(conn.peer, conn);
+      lastPong.set(conn.peer, Date.now());
       console.log('[Network] Peer connected (immediate):', conn.peer);
       if (onPeerJoinCallback) onPeerJoinCallback(conn.peer);
+    }
+  }
+
+  // Heartbeat: host pings all clients, detects dead connections
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [peerId, conn] of connections) {
+        if (conn.open) {
+          sendTo(peerId, { type: '__PING__' });
+        }
+        // Check if peer has gone silent
+        const last = lastPong.get(peerId) || 0;
+        if (now - last > HEARTBEAT_TIMEOUT_MS) {
+          console.warn('[Network] Heartbeat timeout for', peerId);
+          conn.close();
+          connections.delete(peerId);
+          lastPong.delete(peerId);
+          if (onPeerLeaveCallback) onPeerLeaveCallback(peerId);
+        }
+      }
+    }, HEARTBEAT_MS);
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
     }
   }
 
@@ -230,6 +281,7 @@ const Network = (() => {
   function onPeerJoin(cb) { onPeerJoinCallback = cb; }
   function onPeerLeave(cb) { onPeerLeaveCallback = cb; }
   function onConnected(cb) { onConnectedCallback = cb; }
+  function onDisconnected(cb) { onDisconnectedCallback = cb; }
 
   function getPeerId() { return myPeerId; }
   function getIsHost() { return isHost; }
@@ -237,8 +289,10 @@ const Network = (() => {
   function getPeerCount() { return connections.size; }
 
   function destroy() {
+    stopHeartbeat();
     for (const conn of connections.values()) conn.close();
     connections.clear();
+    lastPong.clear();
     if (peer) peer.destroy();
   }
 
@@ -246,7 +300,8 @@ const Network = (() => {
     init, createRoom, joinRoom, discoverHost,
     connectToPeer,
     broadcast, sendTo,
-    onMessage, onPeerJoin, onPeerLeave, onConnected,
+    onMessage, onPeerJoin, onPeerLeave, onConnected, onDisconnected,
+    startHeartbeat, stopHeartbeat,
     getPeerId, getIsHost, getConnectedPeers, getPeerCount,
     destroy,
   };
