@@ -15,10 +15,19 @@ const Network = (() => {
   let reconnectAttempts = 0;
   const MAX_RECONNECT = 5;
 
+  // Self-hosted PeerJS server on Render.com (free, no rate limits)
+  const PEER_SERVER = {
+    host: 'nattice-peerjs.onrender.com',
+    port: 443,
+    path: '/myapp',
+    secure: true,
+  };
+
   function init(customId = null) {
     return new Promise((resolve, reject) => {
       const id = customId || ('TC_' + GameCrypto.generatePlayerId().substring(0, 12));
       peer = new Peer(id, {
+        ...PEER_SERVER,
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
