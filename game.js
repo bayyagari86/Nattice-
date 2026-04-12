@@ -396,6 +396,13 @@ const Game = (() => {
     broadcastState();
     UI.updateLobby(state, mySeat);
     UI.showToast(`${msg.name} joined (Seat ${seat + 1}, Team ${Engine.getTeam(seat)})`);
+
+    // Auto-start when all 6 players have joined
+    const joinedCount = state.players.filter(Boolean).length;
+    if (joinedCount === 6) {
+      UI.showToast('All 6 players joined! Starting game...');
+      setTimeout(() => startGame(), 2000);
+    }
   }
 
   // Start the game (host only)
