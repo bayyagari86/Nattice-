@@ -5,7 +5,7 @@
 const UI = (() => {
   // Card rendering
   const SUIT_SYMBOLS = {
-    spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', notrump: 'NT', joker: 'JOKER'
+    spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', notrump: '\u2668', joker: '\u2605'
   };
   const SUIT_COLORS = {
     spades: '#1a1a2e', hearts: '#c0392b', diamonds: '#c0392b', clubs: '#1a1a2e', notrump: '#ffd700', joker: '#8e44ad'
