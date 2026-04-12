@@ -32,7 +32,9 @@
     }
     .card.spades, .card.clubs { color: #1a1a2e; }
     .card.hearts, .card.diamonds { color: #c0392b; }
-    .card.joker { color: #8e44ad; background: linear-gradient(135deg, #f5f5f5, #e0e0e0); }
+    .card.joker { background: linear-gradient(135deg, #f5f5f5, #e0e0e0); font-size: 14px; }
+    .card.joker.big-joker { color: #c0392b; }
+    .card.joker.small-joker { color: #1a1a2e; }
     .card.notrump { color: #ffd700; }
     .test-section {
       background: #2d2d44;
@@ -146,9 +148,11 @@
     deck.forEach(card => {
       const cardEl = document.createElement('div');
       cardEl.className = `card ${card.suit}`;
+      if (card.id === 'BIG_JOKER') cardEl.classList.add('big-joker');
+      if (card.id === 'SMALL_JOKER') cardEl.classList.add('small-joker');
       const symbol = SUIT_SYMBOLS[card.suit] || '';
       const rank = card.id === 'BIG_JOKER' ? 'BIG' : (card.id === 'SMALL_JOKER' ? 'SM' : card.rank);
-      cardEl.innerHTML = `<div>${rank}</div><div>${symbol}</div>`;
+      cardEl.innerHTML = `<div>${rank}</div><div style="font-size: 1.4em;">${symbol}</div>`;
       cardEl.title = `${card.id} - ${card.suit}`;
       deckEl.appendChild(cardEl);
     });

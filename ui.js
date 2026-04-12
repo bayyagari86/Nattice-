@@ -614,7 +614,9 @@ const UI = (() => {
     sorted.forEach((card, idx) => {
       const isPlayable = !!playable.find(c => c.id === card.id);
       const isTrump = card.suit === state.currentRound.trumpSuit;
-      const color = SUIT_COLORS[card.suit] || '#333';
+      let color = SUIT_COLORS[card.suit] || '#333';
+      if (card.id === 'BIG_JOKER') color = '#c0392b';
+      if (card.id === 'SMALL_JOKER') color = '#1a1a2e';
       const symbol = SUIT_SYMBOLS[card.suit] || '';
       let displayRank = card.rank;
       if (card.id === 'BIG_JOKER') displayRank = 'BIG';
@@ -629,7 +631,7 @@ const UI = (() => {
       const y = isMobile ? (arcRise - yOffset) : 0;
 
       const cardEl = document.createElement('div');
-      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${isTrump ? 'trump-card' : ''}`;
+      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${isTrump ? 'trump-card' : ''} ${card.suit === 'joker' ? 'joker-card' : ''}`;
       cardEl.dataset.cardId = card.id;
       cardEl.style.cssText = isMobile
         ? `left:${x}px; top:${y}px; transform:rotate(${angle}deg); z-index:${idx + 1};`
@@ -690,7 +692,9 @@ const UI = (() => {
     trick.forEach(({ playerIndex, card }) => {
       const relIdx = ((playerIndex - mySeat + 6) % 6);
       const pos = positions[relIdx];
-      const color = SUIT_COLORS[card.suit] || '#333';
+      let color = SUIT_COLORS[card.suit] || '#333';
+      if (card.id === 'BIG_JOKER') color = '#c0392b';
+      if (card.id === 'SMALL_JOKER') color = '#1a1a2e';
       const symbol = SUIT_SYMBOLS[card.suit] || '';
       let displayRank = card.rank;
       if (card.id === 'BIG_JOKER') displayRank = 'BIG';
@@ -701,7 +705,7 @@ const UI = (() => {
       const playerLabel = playerIndex === mySeat ? 'You' : (player ? player.name : '?');
 
       const el = document.createElement('div');
-      el.className = 'trick-card';
+      el.className = `trick-card ${card.suit === 'joker' ? 'joker-card' : ''}`;
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
       el.innerHTML = `
         <div class="card-mini" style="color:${color}">

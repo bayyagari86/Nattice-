@@ -29,7 +29,8 @@ const Engine = (() => {
 
   function createDeck() {
     const deck = [];
-    for (const suit of SUITS) {
+    const baseSuits = ['spades', 'hearts', 'diamonds', 'clubs'];
+    for (const suit of baseSuits) {
       for (const rank of RANKS) {
         deck.push({ suit, rank, id: `${rank}_${suit}` });
       }
@@ -49,7 +50,8 @@ const Engine = (() => {
       const strongPlayers = [0, 3]; // One from each team
       for (const seat of strongPlayers) {
         // Pick a random suit for long suit
-        const suit = SUITS[Math.floor(Math.random() * SUITS.length)];
+        const baseSuits = ['spades', 'hearts', 'diamonds', 'clubs'];
+        const suit = baseSuits[Math.floor(Math.random() * baseSuits.length)];
         // Give 5 cards of that suit including A, K
         const suitCards = deck.filter(c => c.suit === suit);
         const highCards = suitCards.filter(c => ['A', 'K', 'Q'].includes(c.rank));

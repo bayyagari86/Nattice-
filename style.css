@@ -861,6 +861,12 @@ html, body {
 }
 .card.waiting { opacity: 0.65; }
 .card.trump-card { border: 2px solid var(--accent-gold); box-shadow: 0 0 12px rgba(240,192,64,0.3); }
+.joker-card .card-rank { font-size: 10px !important; letter-spacing: -0.05em; line-height: 1.1; }
+.joker-card .card-suit { font-size: 14px !important; line-height: 1; }
+@media (min-width: 1024px) {
+  .joker-card .card-rank { font-size: 11px !important; }
+  .joker-card .card-suit { font-size: 16px !important; }
+}
 .card.played { animation: cardFlyOut 0.28s forwards; }
 @keyframes cardFlyOut {
   to { transform: translateY(-180px) scale(0.4); opacity: 0; }
