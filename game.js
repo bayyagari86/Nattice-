@@ -1085,6 +1085,11 @@ const Game = (() => {
     processNoRaise();
   }
 
+  function processNoRaise() {
+    UI.showToast('Bid not raised');
+    resumeAfterRaise();
+  }
+
   function processRaise(newBid) {
     if (newBid > state.currentRound.bid && newBid <= 9) {
       state.currentRound.bid = newBid;
@@ -1443,11 +1448,26 @@ const Game = (() => {
           return Engine.determineTrickWinnerRefined(testTrick, trump) === seat;
         });
 
-        const shouldUseBigJoker =
-          (oppWinningWithJoker || oppWinningWithTrumpA) && criticalTrick ||
-          (cheapWins.length === 0 && criticalTrick && (opponentWinning || endgame));
+        // --- INFORMATION MANAGEMENT: consider if revealing Big Joker helps opponents ---
+        // If opponents don't know Big Joker is gone, they might play conservatively
+        // Revealing it early lets them play more aggressively
+        const bigJokerUnknown = !bigJokerGone;
+        const opponentsLeftToPlay = opponentSeatsAfter.length > 0;
 
-        if (!shouldUseBigJoker) {
+        const shouldUseBigJoker =
+          // Must use if opponent has unbeatable card AND it's critical
+          (oppWinningWithJoker || oppWinningWithTrumpA) && criticalTrick ||
+          // Use if no other way to win AND it's critical
+          (cheapWins.length === 0 && criticalTrick && (opponentWinning || endgame)) ||
+          // Use in endgame when every trick matters
+          (endgame && criticalTrick && cheapWins.length === 0);
+
+        // INFORMATION CHECK: if Big Joker is unknown and opponents remain, consider sacrificing
+        if (bigJokerUnknown && opponentsLeftToPlay && !criticalTrick && cheapWins.length === 0) {
+          // Better to lose this trick and keep Big Joker hidden
+          // Opponents will remain cautious not knowing who has it
+          chosen = getDumpCard(playable, trump, leadSuit);
+        } else if (!shouldUseBigJoker) {
           // Save Big Joker — try to win cheaply without it
           if (cheapWins.length > 0) {
             const nonTrumpCheap = cheapWins.filter(c => c.suit !== trump);
@@ -1519,12 +1539,40 @@ const Game = (() => {
     processPlayCard(seat, chosen.id);
   }
 
-  // Choose what to lead with — memory-aware and unpredictable
+  // Choose what to lead with — memory-aware and teammate-coordinated
   function aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam) {
     const oppTeam = myTeam === 'A' ? 'B' : 'A';
 
+    // Identify teammate seats
+    const teammateSeats = [0,1,2,3,4,5].filter(s => Engine.getTeam(s) === myTeam && s !== seat);
     // Identify opponent seats
     const oppSeats = [0,1,2,3,4,5].filter(s => Engine.getTeam(s) === oppTeam);
+
+    // --- TEAMMATE ANALYSIS: infer teammate's strong suits from their play history ---
+    const teammateStrongSuits = new Set();
+    for (const tSeat of teammateSeats) {
+      const high = aiMemory.highCardPlayed[tSeat] || {};
+      for (const [suit, val] of Object.entries(high)) {
+        if (val >= 10) teammateStrongSuits.add(suit); // Teammate has played K or A in this suit
+      }
+    }
+    // Also check if teammate has shown void in any suit (don't lead those)
+    const teammateVoidSuits = new Set();
+    for (const tSeat of teammateSeats) {
+      const voids = aiMemory.suitVoids[tSeat] || new Set();
+      for (const v of voids) teammateVoidSuits.add(v);
+    }
+
+    // --- PRIORITY 1: Lead to teammate's strong suit to set them up ---
+    const teammateStrongLeads = playable.filter(c =>
+      c.suit !== trump && c.suit !== 'joker' &&
+      teammateStrongSuits.has(c.suit) &&
+      !teammateVoidSuits.has(c.suit)
+    );
+    if (teammateStrongLeads.length > 0) {
+      // Lead low card of their strong suit - they can win with high cards
+      return teammateStrongLeads.sort((a,b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+    }
 
     // Suits the human has been repeatedly leading (patterns to counter)
     const humanFavSuit = (() => {
