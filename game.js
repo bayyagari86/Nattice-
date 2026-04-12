@@ -750,7 +750,7 @@ const Game = (() => {
   }
 
   function processBid(seat, bid) {
-    if (!Engine.isValidBid(bid, state.currentRound.bid)) {
+    if (!Engine.isValidBid(bid, state.currentRound.bid, state.phase, state)) {
       // Force pass if invalid
       processBid(seat, 0);
       return;

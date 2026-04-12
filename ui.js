@@ -835,7 +835,7 @@ const UI = (() => {
 
     // Bid buttons (5-9, only valid ones)
     for (let b = 5; b <= 9; b++) {
-      if (Engine.isValidBid(b, state.currentRound.bid)) {
+      if (Engine.isValidBid(b, state.currentRound.bid, state.phase, state)) {
         const btn = document.createElement('button');
         btn.className = 'bid-btn';
         btn.textContent = b;
@@ -943,16 +943,19 @@ const UI = (() => {
       btns.appendChild(noBtn);
       
       for (let b = currentBid + 1; b <= 9; b++) {
-        const btn = document.createElement('button');
-        btn.className = 'bid-btn';
-        btn.textContent = b;
-        if (b === 8) btn.textContent = `${b} (LS)`;
-        if (b === 9) btn.textContent = `${b} (GS)`;
-        btn.addEventListener('click', () => {
-          panel.style.display = 'none';
-          Game.raiseBid(b);
-        });
-        btns.appendChild(btn);
+        // Only show valid bids (winning team can raise in raise phase)
+        if (Engine.isValidBid(b, currentBid, 'RAISE_CHECK', state)) {
+          const btn = document.createElement('button');
+          btn.className = 'bid-btn';
+          btn.textContent = b;
+          if (b === 8) btn.textContent = `${b} (LS)`;
+          if (b === 9) btn.textContent = `${b} (GS)`;
+          btn.addEventListener('click', () => {
+            panel.style.display = 'none';
+            Game.raiseBid(b);
+          });
+          btns.appendChild(btn);
+        }
       }
     }
   }

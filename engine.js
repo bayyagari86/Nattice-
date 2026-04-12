@@ -189,9 +189,31 @@ const Engine = (() => {
   }
 
   // Bidding validation
-  function isValidBid(bid, currentHighBid) {
+  function isValidBid(bid, currentHighBid, phase = 'BIDDING', gameState = null) {
     if (bid === 0) return true; // Pass
     if (bid < 5 || bid > 9) return false;
+
+    // Initial bidding phase: max bid is 5
+    if (phase === 'BIDDING') {
+      if (currentHighBid === 0) return bid >= 5 && bid <= 5; // First bid must be exactly 5
+      return bid > currentHighBid && bid <= 5; // Must beat current bid but not exceed 5
+    }
+
+    // Raise phase (RAISE_CHECK): only winning team can raise, up to 9
+    if (phase === 'RAISE_CHECK' && gameState) {
+      const biddingTeam = gameState.currentRound?.biddingTeam;
+      const tricksPlayed = gameState.currentRound?.tricksPlayed || 0;
+      const tricksTaken = gameState.currentRound?.tricksTaken || { A: 0, B: 0 };
+      const isWinningTeam = tricksTaken[biddingTeam] >= tricksPlayed;
+
+      // If not winning team, can't raise
+      if (!isWinningTeam) return false;
+
+      // Winning team can raise up to 9
+      return bid > currentHighBid && bid <= 9;
+    }
+
+    // Default fallback (shouldn't reach here in normal flow)
     if (currentHighBid === 0) return bid >= 5;
     return bid > currentHighBid;
   }
