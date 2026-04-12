@@ -16,31 +16,41 @@ const Network = (() => {
   const MAX_RECONNECT = 5;
 
   // Self-hosted PeerJS server on Render.com (free, no rate limits)
-  const PEER_SERVER = {
-    host: 'nattice-peerjs.onrender.com',
-    port: 443,
-    path: '/myapp',
-    secure: true,
-  };
+  // Falls back to PeerJS cloud if Render is unavailable
+  const PEER_SERVERS = [
+    { host: 'nattice-peerjs.onrender.com', port: 443, path: '/myapp', secure: true },
+    null, // null = use PeerJS cloud (default)
+  ];
 
-  function init(customId = null) {
+  function buildPeerOptions(serverConfig) {
+    const base = {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+        ]
+      }
+    };
+    return serverConfig ? { ...serverConfig, ...base } : base;
+  }
+
+  function init(customId = null, serverIndex = 0) {
     return new Promise((resolve, reject) => {
       const id = customId || ('TC_' + GameCrypto.generatePlayerId().substring(0, 12));
-      peer = new Peer(id, {
-        ...PEER_SERVER,
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-          ]
-        }
-      });
+      const serverConfig = PEER_SERVERS[serverIndex];
+      console.log(`[Network] Connecting via ${serverConfig ? serverConfig.host : 'PeerJS cloud'} ...`);
 
-      peer.on('open', (id) => {
-        myPeerId = id;
-        console.log('[Network] My peer ID:', id);
-        resolve(id);
+      peer = new Peer(id, buildPeerOptions(serverConfig));
+
+      let resolved = false;
+
+      peer.on('open', (peerId) => {
+        if (resolved) return;
+        resolved = true;
+        myPeerId = peerId;
+        console.log('[Network] My peer ID:', peerId);
+        resolve(peerId);
       });
 
       peer.on('connection', (conn) => {
@@ -49,11 +59,39 @@ const Network = (() => {
 
       peer.on('error', (err) => {
         console.error('[Network] Peer error:', err);
+        // On server-unavailable errors, try next server in list
+        if (!resolved && (err.type === 'server-error' || err.type === 'network' || err.type === 'socket-error')) {
+          resolved = true;
+          const nextIndex = serverIndex + 1;
+          if (nextIndex < PEER_SERVERS.length) {
+            console.warn(`[Network] Server failed, falling back to ${PEER_SERVERS[nextIndex] ? PEER_SERVERS[nextIndex].host : 'PeerJS cloud'}`);
+            peer.destroy();
+            init(customId, nextIndex).then(resolve).catch(reject);
+          } else {
+            reject(new Error('All PeerJS servers unavailable'));
+          }
+          return;
+        }
         if (err.type === 'disconnected' && reconnectAttempts < MAX_RECONNECT) {
           reconnectAttempts++;
           setTimeout(() => peer.reconnect(), 2000 * reconnectAttempts);
         }
       });
+
+      // Timeout - fall back to next server after 8s
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          const nextIndex = serverIndex + 1;
+          if (nextIndex < PEER_SERVERS.length) {
+            console.warn(`[Network] Server timeout, falling back to ${PEER_SERVERS[nextIndex] ? PEER_SERVERS[nextIndex].host : 'PeerJS cloud'}`);
+            peer.destroy();
+            init(customId, nextIndex).then(resolve).catch(reject);
+          } else {
+            reject(new Error('All PeerJS servers timed out'));
+          }
+        }
+      }, 8000);
 
       peer.on('disconnected', () => {
         console.warn('[Network] Disconnected from signaling');
