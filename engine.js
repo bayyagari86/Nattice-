@@ -18,7 +18,7 @@
 // - Game to 62 points
 
 const Engine = (() => {
-  const SUITS = ['spades', 'hearts', 'diamonds', 'clubs'];
+  const SUITS = ['spades', 'hearts', 'diamonds', 'clubs', 'notrump', 'joker'];
   const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
   const RANK_VALUES = {};
   RANKS.forEach((r, i) => RANK_VALUES[r] = i);
@@ -40,11 +40,64 @@ const Engine = (() => {
   }
 
   function dealCards(deck) {
-    // 9 cards to each of 6 players
+    // 30% chance to deal competitive hands (long suits + high cards)
+    const isCompetitive = Math.random() < 0.3;
     const hands = [[], [], [], [], [], []];
-    for (let i = 0; i < 54; i++) {
-      hands[i % 6].push(deck[i]);
+
+    if (isCompetitive) {
+      // Give 2 players strong hands with long suits
+      const strongPlayers = [0, 3]; // One from each team
+      for (const seat of strongPlayers) {
+        // Pick a random suit for long suit
+        const suit = SUITS[Math.floor(Math.random() * SUITS.length)];
+        // Give 5 cards of that suit including A, K
+        const suitCards = deck.filter(c => c.suit === suit);
+        const highCards = suitCards.filter(c => ['A', 'K', 'Q'].includes(c.rank));
+        const otherSuitCards = suitCards.filter(c => !['A', 'K', 'Q'].includes(c.rank));
+
+        // Add high cards first
+        highCards.forEach(c => {
+          const idx = deck.indexOf(c);
+          if (idx !== -1) {
+            hands[seat].push(c);
+            deck.splice(idx, 1);
+          }
+        });
+
+        // Add more of same suit
+        otherSuitCards.slice(0, 3).forEach(c => {
+          const idx = deck.indexOf(c);
+          if (idx !== -1) {
+            hands[seat].push(c);
+            deck.splice(idx, 1);
+          }
+        });
+
+        // Fill remaining slots with random cards
+        while (hands[seat].length < 9) {
+          const idx = Math.floor(Math.random() * deck.length);
+          hands[seat].push(deck[idx]);
+          deck.splice(idx, 1);
+        }
+      }
+
+      // Deal remaining cards to other players normally
+      for (let i = 0; i < 6; i++) {
+        if (!strongPlayers.includes(i)) {
+          while (hands[i].length < 9) {
+            const idx = Math.floor(Math.random() * deck.length);
+            hands[i].push(deck[idx]);
+            deck.splice(idx, 1);
+          }
+        }
+      }
+    } else {
+      // Normal dealing: round-robin
+      for (let i = 0; i < 54; i++) {
+        hands[i % 6].push(deck[i]);
+      }
     }
+
     return hands;
   }
 
@@ -151,13 +204,14 @@ const Engine = (() => {
     return RANK_VALUES[card.rank]; // 0-12
   }
 
-  // Refined trick winner that handles Small Joker correctly
+  // Refined trick winner that handles Small Joker correctly and No Trump
   function determineTrickWinnerRefined(cardsPlayed, trumpSuit) {
     const leadCard = cardsPlayed[0].card;
     const leadSuit = leadCard.suit === 'joker' ? null : leadCard.suit;
+    const isNoTrump = trumpSuit === 'notrump';
 
-    // Check if any trump card was played
-    const hasTrump = cardsPlayed.some(cp => cp.card.suit === trumpSuit);
+    // Check if any trump card was played (only if not notrump)
+    const hasTrump = !isNoTrump && cardsPlayed.some(cp => cp.card.suit === trumpSuit);
 
     let bestIdx = 0;
     let bestVal = -1;
@@ -169,13 +223,17 @@ const Engine = (() => {
       if (card.id === 'BIG_JOKER') {
         val = 1000;
       } else if (card.id === 'SMALL_JOKER') {
-        // Small joker loses to trump but beats everything else
-        val = hasTrump ? 150 : 900; // If trump was played, small joker is below trump
-      } else if (card.suit === trumpSuit) {
+        // In no-trump, Small Joker beats everything except Big Joker
+        // In normal play, Small Joker loses to trump but beats everything else
+        val = (isNoTrump || !hasTrump) ? 900 : 150;
+      } else if (!isNoTrump && card.suit === trumpSuit) {
+        // Trump cards only matter in normal play
         val = 200 + RANK_VALUES[card.rank];
       } else if (card.suit === leadSuit) {
+        // Lead suit cards
         val = 100 + RANK_VALUES[card.rank];
       } else {
+        // Off-suit (no value)
         val = RANK_VALUES[card.rank];
       }
 

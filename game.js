@@ -1302,7 +1302,17 @@ const Game = (() => {
   function aiSelectTrump(seat) {
     const hand = state.hands[seat];
     const eval_ = aiEvalHand(hand);
-    processTrumpSelect(eval_.bestSuit || 'spades');
+
+    // AI sometimes chooses no-trump if hand is balanced (no long suit)
+    const suitCounts = Object.values(eval_.suitCounts);
+    const maxSuitCount = Math.max(...suitCounts);
+    const isBalanced = maxSuitCount <= 3; // No suit longer than 3 cards
+
+    if (isBalanced && Math.random() < 0.3) {
+      processTrumpSelect('notrump');
+    } else {
+      processTrumpSelect(eval_.bestSuit || 'spades');
+    }
   }
 
   function aiPlayCard(seat) {

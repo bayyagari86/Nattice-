@@ -5,10 +5,10 @@
 const UI = (() => {
   // Card rendering
   const SUIT_SYMBOLS = {
-    spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', joker: '\u2605'
+    spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', notrump: '\u2668', joker: '\u2605'
   };
   const SUIT_COLORS = {
-    spades: '#1a1a2e', hearts: '#c0392b', diamonds: '#c0392b', clubs: '#1a1a2e', joker: '#8e44ad'
+    spades: '#1a1a2e', hearts: '#c0392b', diamonds: '#c0392b', clubs: '#1a1a2e', notrump: '#ffd700', joker: '#8e44ad'
   };
 
   let toastTimeout = null;
@@ -464,8 +464,9 @@ const UI = (() => {
     // Trump info
     const trumpInfo = document.getElementById('trump-info');
     if (round.trumpSuit) {
-      const TRUMP_BANNER_COLORS = { spades: '#e0e0e0', hearts: '#ff6b6b', diamonds: '#ff8c42', clubs: '#a8d8a8', joker: '#c084fc' };
-      trumpInfo.innerHTML = `Trump: <span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${SUIT_SYMBOLS[round.trumpSuit]} ${round.trumpSuit.toUpperCase()}</span>`;
+      const TRUMP_BANNER_COLORS = { spades: '#e0e0e0', hearts: '#ff6b6b', diamonds: '#ff8c42', clubs: '#a8d8a8', notrump: '#ffd700', joker: '#c084fc' };
+      const trumpText = round.trumpSuit === 'notrump' ? 'No Trump' : `${SUIT_SYMBOLS[round.trumpSuit]} ${round.trumpSuit.toUpperCase()}`;
+      trumpInfo.innerHTML = `Trump: <span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${trumpText}</span>`;
     } else {
       trumpInfo.textContent = '';
     }
@@ -857,10 +858,16 @@ const UI = (() => {
     const btns = panel.querySelector('.trump-buttons');
 
     Engine.SUITS.forEach(suit => {
+      if (suit === 'joker') return; // Skip joker suit
       const btn = document.createElement('button');
       btn.className = 'trump-btn';
-      btn.style.color = SUIT_COLORS[suit];
-      btn.innerHTML = `${SUIT_SYMBOLS[suit]}<br><span>${suit}</span>`;
+      if (suit === 'notrump') {
+        btn.style.color = '#ffd700';
+        btn.innerHTML = `🚫<br><span>No Trump</span>`;
+      } else {
+        btn.style.color = SUIT_COLORS[suit];
+        btn.innerHTML = `${SUIT_SYMBOLS[suit]}<br><span>${suit}</span>`;
+      }
       btn.addEventListener('click', () => Game.selectTrump(suit));
       btns.appendChild(btn);
     });
