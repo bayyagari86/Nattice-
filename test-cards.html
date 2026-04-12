@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Card Test - Trump Call</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #1a1a2e;
+      color: #fff;
+    }
+    .deck-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+    .card {
+      width: 70px;
+      height: 100px;
+      background: white;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: bold;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .card.spades, .card.clubs { color: #1a1a2e; }
+    .card.hearts, .card.diamonds { color: #c0392b; }
+    .card.joker { color: #8e44ad; background: linear-gradient(135deg, #f5f5f5, #e0e0e0); }
+    .card.notrump { color: #ffd700; }
+    .test-section {
+      background: #2d2d44;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    .test-result {
+      margin: 10px 0;
+      padding: 10px;
+      background: #3d3d5c;
+      border-radius: 4px;
+    }
+    .winner {
+      color: #ffd700;
+      font-weight: bold;
+    }
+    h1, h2 { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <h1>Trump Call - Card Test</h1>
+  
+  <div class="test-section">
+    <h2>All 54 Cards</h2>
+    <div id="deck" class="deck-container"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Card Value Logic (Trump: Spades)</h2>
+    <div id="card-values"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>Trick Winner Tests</h2>
+    <div id="trick-tests"></div>
+  </div>
+
+  <script>
+    // Copy of Engine logic
+    const SUITS = ['spades', 'hearts', 'diamonds', 'clubs', 'notrump', 'joker'];
+    const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+    const RANK_VALUES = {};
+    RANKS.forEach((r, i) => RANK_VALUES[r] = i);
+
+    const CARD_BIG_JOKER = { suit: 'joker', rank: 'BIG', id: 'BIG_JOKER' };
+    const CARD_SMALL_JOKER = { suit: 'joker', rank: 'SMALL', id: 'SMALL_JOKER' };
+
+    const SUIT_SYMBOLS = {
+      spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', notrump: '\u2668', joker: '\u2605'
+    };
+
+    function createDeck() {
+      const deck = [];
+      for (const suit of ['spades', 'hearts', 'diamonds', 'clubs']) {
+        for (const rank of RANKS) {
+          deck.push({ suit, rank, id: `${rank}_${suit}` });
+        }
+      }
+      deck.push({ ...CARD_BIG_JOKER });
+      deck.push({ ...CARD_SMALL_JOKER });
+      return deck;
+    }
+
+    function determineTrickWinnerRefined(cardsPlayed, trumpSuit) {
+      const leadCard = cardsPlayed[0].card;
+      const leadSuit = leadCard.suit === 'joker' ? null : leadCard.suit;
+
+      // Check if any trump card was played
+      const hasTrump = cardsPlayed.some(cp => cp.card.suit === trumpSuit);
+
+      let bestIdx = 0;
+      let bestVal = -1;
+
+      for (let i = 0; i < cardsPlayed.length; i++) {
+        const card = cardsPlayed[i].card;
+        let val;
+
+        if (card.id === 'BIG_JOKER') {
+          val = 1000;
+        } else if (card.id === 'SMALL_JOKER') {
+          val = hasTrump ? 150 : 900;
+        } else if (card.suit === trumpSuit) {
+          val = 200 + RANK_VALUES[card.rank];
+        } else if (card.suit === leadSuit) {
+          val = 100 + RANK_VALUES[card.rank];
+        } else {
+          val = RANK_VALUES[card.rank];
+        }
+
+        if (val > bestVal) {
+          bestVal = val;
+          bestIdx = i;
+        }
+      }
+
+      return { winner: cardsPlayed[bestIdx].playerIndex, winningCard: cardsPlayed[bestIdx].card, value: bestVal };
+    }
+
+    function cardValue(card, trumpSuit, leadSuit) {
+      if (card.id === 'BIG_JOKER') return 1000;
+      if (card.id === 'SMALL_JOKER') return 500;
+      if (card.suit === trumpSuit) return 200 + RANK_VALUES[card.rank];
+      if (card.suit === leadSuit) return 100 + RANK_VALUES[card.rank];
+      return RANK_VALUES[card.rank];
+    }
+
+    // Render deck
+    const deck = createDeck();
+    const deckEl = document.getElementById('deck');
+    deck.forEach(card => {
+      const cardEl = document.createElement('div');
+      cardEl.className = `card ${card.suit}`;
+      const symbol = SUIT_SYMBOLS[card.suit] || '';
+      const rank = card.id === 'BIG_JOKER' ? 'BIG' : (card.id === 'SMALL_JOKER' ? 'SM' : card.rank);
+      cardEl.innerHTML = `<div>${rank}</div><div>${symbol}</div>`;
+      cardEl.title = `${card.id} - ${card.suit}`;
+      deckEl.appendChild(cardEl);
+    });
+
+    // Render card values
+    const valuesEl = document.getElementById('card-values');
+    const trump = 'spades';
+    const lead = 'hearts';
+    
+    valuesEl.innerHTML = `<p>Trump: ${trump}, Lead: ${lead}</p>`;
+    
+    const testCards = [
+      { card: { id: 'BIG_JOKER', suit: 'joker', rank: 'BIG' }, val: cardValue({ id: 'BIG_JOKER', suit: 'joker', rank: 'BIG' }, trump, lead) },
+      { card: { id: 'SMALL_JOKER', suit: 'joker', rank: 'SM' }, val: cardValue({ id: 'SMALL_JOKER', suit: 'joker', rank: 'SM' }, trump, lead) },
+      { card: { id: 'A_spades', suit: 'spades', rank: 'A' }, val: cardValue({ id: 'A_spades', suit: 'spades', rank: 'A' }, trump, lead) },
+      { card: { id: 'K_spades', suit: 'spades', rank: 'K' }, val: cardValue({ id: 'K_spades', suit: 'spades', rank: 'K' }, trump, lead) },
+      { card: { id: 'A_hearts', suit: 'hearts', rank: 'A' }, val: cardValue({ id: 'A_hearts', suit: 'hearts', rank: 'A' }, trump, lead) },
+      { card: { id: '2_hearts', suit: 'hearts', rank: '2' }, val: cardValue({ id: '2_hearts', suit: 'hearts', rank: '2' }, trump, lead) },
+      { card: { id: 'A_diamonds', suit: 'diamonds', rank: 'A' }, val: cardValue({ id: 'A_diamonds', suit: 'diamonds', rank: 'A' }, trump, lead) },
+    ];
+    
+    testCards.sort((a, b) => b.val - a.val);
+    
+    testCards.forEach(tc => {
+      const div = document.createElement('div');
+      div.className = 'test-result';
+      div.innerHTML = `${tc.card.id}: value = ${tc.val}`;
+      valuesEl.appendChild(div);
+    });
+
+    // Trick winner tests
+    const testsEl = document.getElementById('trick-tests');
+    
+    const tests = [
+      {
+        name: 'Test 1: Big Joker vs Trump A',
+        cards: [
+          { playerIndex: 0, card: { id: 'A_spades', suit: 'spades', rank: 'A' } },
+          { playerIndex: 1, card: { id: 'BIG_JOKER', suit: 'joker', rank: 'BIG' } }
+        ],
+        trump: 'spades'
+      },
+      {
+        name: 'Test 2: Big Joker vs Small Joker vs Trump K',
+        cards: [
+          { playerIndex: 0, card: { id: 'K_spades', suit: 'spades', rank: 'K' } },
+          { playerIndex: 1, card: { id: 'SMALL_JOKER', suit: 'joker', rank: 'SM' } },
+          { playerIndex: 2, card: { id: 'BIG_JOKER', suit: 'joker', rank: 'BIG' } }
+        ],
+        trump: 'spades'
+      },
+      {
+        name: 'Test 3: Lead suit vs Trump',
+        cards: [
+          { playerIndex: 0, card: { id: 'A_hearts', suit: 'hearts', rank: 'A' } },
+          { playerIndex: 1, card: { id: 'K_spades', suit: 'spades', rank: 'K' } }
+        ],
+        trump: 'spades'
+      },
+      {
+        name: 'Test 4: Small Joker without trump',
+        cards: [
+          { playerIndex: 0, card: { id: 'A_hearts', suit: 'hearts', rank: 'A' } },
+          { playerIndex: 1, card: { id: 'SMALL_JOKER', suit: 'joker', rank: 'SM' } }
+        ],
+        trump: 'hearts'
+      },
+      {
+        name: 'Test 5: Small Joker with trump',
+        cards: [
+          { playerIndex: 0, card: { id: 'A_hearts', suit: 'hearts', rank: 'A' } },
+          { playerIndex: 1, card: { id: 'SMALL_JOKER', suit: 'joker', rank: 'SM' } },
+          { playerIndex: 2, card: { id: 'K_spades', suit: 'spades', rank: 'K' } }
+        ],
+        trump: 'spades'
+      }
+    ];
+
+    tests.forEach(test => {
+      const result = determineTrickWinnerRefined(test.cards, test.trump);
+      const div = document.createElement('div');
+      div.className = 'test-result';
+      div.innerHTML = `
+        <strong>${test.name}</strong><br>
+        Trump: ${test.trump}<br>
+        Cards: ${test.cards.map(c => c.card.id).join(', ')}<br>
+        <span class="winner">Winner: Player ${result.winner} with ${result.winningCard.id} (value: ${result.value})</span>
+      `;
+      testsEl.appendChild(div);
+    });
+  </script>
+</body>
+</html>

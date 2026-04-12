@@ -204,14 +204,13 @@ const Engine = (() => {
     return RANK_VALUES[card.rank]; // 0-12
   }
 
-  // Refined trick winner that handles Small Joker correctly and No Trump
+  // Refined trick winner that handles Small Joker correctly
   function determineTrickWinnerRefined(cardsPlayed, trumpSuit) {
     const leadCard = cardsPlayed[0].card;
     const leadSuit = leadCard.suit === 'joker' ? null : leadCard.suit;
-    const isNoTrump = trumpSuit === 'notrump';
 
-    // Check if any trump card was played (only if not notrump)
-    const hasTrump = !isNoTrump && cardsPlayed.some(cp => cp.card.suit === trumpSuit);
+    // Check if any trump card was played
+    const hasTrump = cardsPlayed.some(cp => cp.card.suit === trumpSuit);
 
     let bestIdx = 0;
     let bestVal = -1;
@@ -223,17 +222,13 @@ const Engine = (() => {
       if (card.id === 'BIG_JOKER') {
         val = 1000;
       } else if (card.id === 'SMALL_JOKER') {
-        // In no-trump, Small Joker beats everything except Big Joker
-        // In normal play, Small Joker loses to trump but beats everything else
-        val = (isNoTrump || !hasTrump) ? 900 : 150;
-      } else if (!isNoTrump && card.suit === trumpSuit) {
-        // Trump cards only matter in normal play
+        // Small joker loses to trump but beats everything else
+        val = hasTrump ? 150 : 900; // If trump was played, small joker is below trump
+      } else if (card.suit === trumpSuit) {
         val = 200 + RANK_VALUES[card.rank];
       } else if (card.suit === leadSuit) {
-        // Lead suit cards
         val = 100 + RANK_VALUES[card.rank];
       } else {
-        // Off-suit (no value)
         val = RANK_VALUES[card.rank];
       }
 
