@@ -15,6 +15,10 @@ const UI = (() => {
 
   let badgePopupTimeout = null;
 
+  // Countdown intervals — kept module-scoped so we can clear/replace as state updates arrive.
+  let raiseCountdownInterval = null;
+  let turnCountdownInterval = null;
+
   function simulateGameplay(mode) {
     if (!Game || !Game.state) return;
     
@@ -392,6 +396,9 @@ const UI = (() => {
     const seatsDiv = document.getElementById('lobby-seats');
     seatsDiv.innerHTML = '';
 
+    const iAmHost = typeof Network !== 'undefined' && Network.getIsHost && Network.getIsHost();
+
+    let humanCount = 0;
     for (let i = 0; i < 6; i++) {
       const player = state.players[i];
       const team = Engine.getTeam(i);
@@ -399,13 +406,49 @@ const UI = (() => {
       seatEl.className = `lobby-seat ${player ? 'occupied' : 'empty'} team-${team.toLowerCase()}`;
       if (i === mySeat) seatEl.classList.add('me');
 
+      const statusBadge = player && player.connected === false
+        ? '<div class="seat-dc">Disconnected \u2013 bot playing</div>'
+        : (player ? '<div class="seat-ok">\u2713 Connected</div>' : '');
+
+      // Host-only kick button (never on your own seat or on empty seats)
+      const kickBtn = (iAmHost && player && i !== mySeat)
+        ? `<button class="seat-kick-btn" data-kick-seat="${i}" title="Kick this player">\u2715</button>`
+        : '';
+
       seatEl.innerHTML = `
         <div class="seat-number">Seat ${i + 1}</div>
         <div class="seat-team">Team ${team}</div>
         <div class="seat-name">${player ? player.name : 'Empty'}</div>
-        ${player && player.connected === false ? '<div class="seat-dc">Disconnected</div>' : ''}
+        ${statusBadge}
+        ${kickBtn}
       `;
       seatsDiv.appendChild(seatEl);
+      if (player && !player.isAI) humanCount++;
+    }
+
+    // Wire kick buttons — host only
+    if (iAmHost) {
+      seatsDiv.querySelectorAll('[data-kick-seat]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const seat = Number(btn.getAttribute('data-kick-seat'));
+          if (confirm('Kick player from seat ' + (seat + 1) + '?')) {
+            Game.kickPlayer && Game.kickPlayer(seat);
+          }
+        });
+      });
+    }
+
+    // Player count + Start-Now button state
+    const status = document.getElementById('lobby-status');
+    if (status && state.phase === 'WAITING') {
+      status.textContent = `${humanCount}/6 players joined \u2014 ${humanCount >= 2 ? 'ready to start' : 'waiting...'}`;
+    }
+    const startBtn = document.getElementById('start-game-btn');
+    if (startBtn && iAmHost && state.phase === 'WAITING') {
+      startBtn.style.display = 'block';
+      startBtn.textContent = humanCount >= 6 ? 'Starting...' : `Start Now (fill ${6 - humanCount} with bots)`;
+      startBtn.disabled = humanCount < 2;
     }
 
     // Show host ID for sharing
@@ -764,6 +807,39 @@ const UI = (() => {
 
     // Trick counter
     document.getElementById('trick-counter').textContent = `Trick ${state.currentRound.tricksPlayed + 1} of 9`;
+
+    // Live turn countdown — shown to everyone when the host has armed a turnDeadline
+    // (only fires for human non-host players). Uses a deadline broadcast so all clients
+    // stay in sync without host-→client tick messages.
+    renderTurnCountdown(state, mySeat);
+  }
+
+  function renderTurnCountdown(state, mySeat) {
+    if (turnCountdownInterval) { clearInterval(turnCountdownInterval); turnCountdownInterval = null; }
+    const infoEl = document.getElementById('game-info');
+    if (!infoEl) return;
+    const deadline = state.currentRound?.turnDeadline;
+    const currentSeat = state.currentRound?.currentPlayer;
+    // Show timer only in-round while someone else's clock is ticking; hide on your own turn
+    if (!deadline || state.phase === 'ROUND_END' || state.phase === 'GAME_OVER') return;
+    if (currentSeat === mySeat) return;
+
+    const basePlayer = state.players[currentSeat];
+    const baseText = infoEl.textContent;
+
+    const tick = () => {
+      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      if (!document.body.contains(infoEl)) {
+        clearInterval(turnCountdownInterval); turnCountdownInterval = null; return;
+      }
+      const suffix = secs > 0 ? ` \u23f1 ${secs}s` : '';
+      // Preserve the base sentence — append/replace suffix only
+      const stripped = baseText.replace(/ \u23f1 \d+s$/, '');
+      infoEl.textContent = stripped + suffix;
+      if (secs <= 0) { clearInterval(turnCountdownInterval); turnCountdownInterval = null; }
+    };
+    tick();
+    turnCountdownInterval = setInterval(tick, 500);
   }
 
   // === ROUND HISTORY ===
@@ -908,10 +984,12 @@ const UI = (() => {
     }
     
     const potentialTotal = tricksWon + totalCommitted;
-    const timer = state.currentRound.raiseTimer || 20;
+    // Prefer live deadline; fall back to static timer for backwards compat
+    const deadline = state.currentRound.raiseDeadline || (Date.now() + (state.currentRound.raiseTimer || 20) * 1000);
+    const initialSecs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
     
     panel.innerHTML = `
-      <div class="bid-title">Raise Discussion (${timer}s)</div>
+      <div class="bid-title">Raise Discussion (<span id="raise-countdown">${initialSecs}</span>s)</div>
       <div class="raise-info">Current bid: ${currentBid} | Tricks won: ${tricksWon}</div>
       ${commitmentsList ? `<div class="commitments-box">${commitmentsList}<div class="commitment-total">Potential: ${potentialTotal} tricks</div></div>` : ''}
       <div class="raise-commitment" id="raise-commitment">
@@ -929,6 +1007,17 @@ const UI = (() => {
       ${isBidder ? '<div class="bid-buttons" id="raise-buttons"></div>' : '<div class="raise-waiting">Waiting for bidder to decide...</div>'}
     `;
     
+    // Live countdown — deadline-based so every client stays in sync
+    if (raiseCountdownInterval) { clearInterval(raiseCountdownInterval); raiseCountdownInterval = null; }
+    raiseCountdownInterval = setInterval(() => {
+      const el = document.getElementById('raise-countdown');
+      if (!el) { clearInterval(raiseCountdownInterval); raiseCountdownInterval = null; return; }
+      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      el.textContent = String(secs);
+      if (secs <= 5) el.style.color = '#ff6b6b';
+      if (secs <= 0) { clearInterval(raiseCountdownInterval); raiseCountdownInterval = null; }
+    }, 250);
+
     // Wire up commitment button
     document.getElementById('commit-btn')?.addEventListener('click', () => {
       const tricks = parseInt(document.getElementById('my-commitment').value);

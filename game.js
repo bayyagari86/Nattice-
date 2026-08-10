@@ -164,7 +164,12 @@ const Game = (() => {
     myName = playerName;
     myPlayerId = GameCrypto.generatePlayerId();
     state = Engine.createGameState();
+    state.version = 0;
+    state.hostPlayerId = myPlayerId; // used by host-migration to elect the next host deterministically
     roomCode = GameCrypto.generateRoomCode();
+    cardPlaySeqCounter = 0;
+    lastAppliedStateVersion = 0;
+    playedCardSeq.clear();
 
     // Use deterministic peer ID based on room code so joiners can find host by room code only
     await Network.init('TC_' + roomCode);
@@ -196,6 +201,12 @@ const Game = (() => {
     
     await Network.joinRoom(hostPeerId, code);
 
+    // Initialize sync state
+    cardPlaySeqCounter = 0;
+    lastAppliedStateVersion = 0;
+    playedCardSeq.clear();
+    currentHostPeerId = hostPeerId;
+
     // Send join request to host
     const derivedHostPeerId = 'TC_' + code.toUpperCase();
     Network.sendTo(derivedHostPeerId, {
@@ -211,7 +222,17 @@ const Game = (() => {
   let turnTimer = null;
   let raiseTimer = null;
   const TURN_TIMEOUT_MS = 45000; // 45s before auto-play
-  let disconnectedPlayers = new Map(); // peerId -> { seat, name, playerId, hand }
+  // Keyed by playerId (stable across peerId changes), value: { seat, name, playerId, hand }
+  let disconnectedPlayers = new Map();
+  // Authoritative host peerId as seen by clients (not always seat 0 — e.g. after host migration)
+  let currentHostPeerId = null;
+
+  // State-sync anti-race: host stamps each state broadcast with a monotonic version;
+  // clients ignore STATE_UPDATE with version <= lastAppliedStateVersion.
+  // CARD_PLAYED messages carry a per-play sequence number so clients dedupe replays.
+  let lastAppliedStateVersion = 0;
+  let playedCardSeq = new Set(); // 'seat:cardId:seq' strings we've already applied
+  let cardPlaySeqCounter = 0; // host-side; increments per card played
 
   function setupHostListeners() {
     Network.onMessage((fromPeer, msg) => {
@@ -265,6 +286,10 @@ const Game = (() => {
   function startTurnTimer() {
     clearTurnTimer();
     if (!Network.getIsHost() && !isSoloMode) return;
+    // Deadline broadcast to all clients so they can render a live turn countdown
+    if (state && state.currentRound) {
+      state.currentRound.turnDeadline = Date.now() + TURN_TIMEOUT_MS;
+    }
     turnTimer = setTimeout(() => {
       if (!state || !state.currentRound) return;
       const seat = state.currentRound.currentPlayer;
@@ -298,6 +323,9 @@ const Game = (() => {
   function startRaiseTimer() {
     clearRaiseTimer();
     const timerDuration = state.currentRound.raiseTimer || 20;
+    // Deadline in epoch ms — lets every client render a live countdown
+    // without host-→client tick messages.
+    state.currentRound.raiseDeadline = Date.now() + timerDuration * 1000;
     raiseTimer = setTimeout(() => {
       console.log('[Host] Raise timer expired - automatically no raise');
       processNoRaise();
@@ -317,15 +345,11 @@ const Game = (() => {
     });
 
     // Detect host going away
-    const hostPeerId = 'TC_' + roomCode.toUpperCase();
     Network.onPeerLeave((peerId) => {
+      const hostPeerId = currentHostPeerId || ('TC_' + roomCode.toUpperCase());
       if (peerId === hostPeerId) {
-        console.error('[Client] Host disconnected!');
-        UI.showToast('Host disconnected — game ended');
-        setTimeout(() => {
-          UI.showScreen('title-screen');
-          cleanup();
-        }, 2500);
+        console.warn('[Client] Host disconnected — attempting host migration');
+        attemptHostMigration(peerId);
       }
     });
 
@@ -337,6 +361,18 @@ const Game = (() => {
 
     // Handle mobile browser going to background
     document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+
+  // Get the authoritative host peer id from a client's perspective
+  // Prefers the value received from the host during handshake (currentHostPeerId).
+  // Falls back to seatToPeer.get(0) then any connected peer (legacy behavior).
+  function getHostPeerId() {
+    if (Network.getIsHost()) return Network.getPeerId();
+    if (currentHostPeerId) return currentHostPeerId;
+    const s0 = seatToPeer.get(0);
+    if (s0) return s0;
+    const peers = Network.getConnectedPeers();
+    return peers[0] || null;
   }
 
   function handleVisibilityChange() {
@@ -369,6 +405,9 @@ const Game = (() => {
     seatToPeer.clear();
     disconnectedPlayers.clear();
     isSoloMode = false;
+    currentHostPeerId = null;
+    lastAppliedStateVersion = 0;
+    playedCardSeq.clear();
     document.removeEventListener('visibilitychange', handleVisibilityChange);
   }
 
@@ -423,6 +462,9 @@ const Game = (() => {
         console.log('[Client] Received SEAT_ASSIGNED, seat:', msg.seat);
         mySeat = msg.seat;
         state = msg.state;
+        // Remember authoritative host peer id (survives host-migration & seat-0-not-host)
+        if (msg.hostPeerId) currentHostPeerId = msg.hostPeerId;
+        else currentHostPeerId = fromPeer;
         // Restore passedPlayers as a Set (serialized as array)
         if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
           state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
@@ -437,7 +479,15 @@ const Game = (() => {
         UI.updateLobby(state, mySeat);
         UI.showToast(`Seated at position ${msg.seat + 1} (Team ${Engine.getTeam(msg.seat)})`);
         break;
-      case 'STATE_UPDATE':
+      case 'STATE_UPDATE': {
+        // Anti-race: drop stale/out-of-order state updates
+        const incomingV = msg.state?.version || 0;
+        if (incomingV && incomingV <= lastAppliedStateVersion) {
+          console.log('[Client] Dropping stale STATE_UPDATE v' + incomingV +
+            ' (already at v' + lastAppliedStateVersion + ')');
+          break;
+        }
+        lastAppliedStateVersion = incomingV;
         // Preserve our hand if the state update has empty hands (sanitized)
         const myHand = state?.hands?.[mySeat];
         state = msg.state;
@@ -450,6 +500,7 @@ const Game = (() => {
         }
         UI.updateAll(state, mySeat);
         break;
+      }
       case 'DEAL_HAND':
         state = msg.state;
         state.hands[mySeat] = msg.hand;
@@ -458,6 +509,8 @@ const Game = (() => {
         break;
       case 'DEAL_ALL':
         state = msg.state;
+        lastAppliedStateVersion = state.version || 0;
+        playedCardSeq.clear();
         // Restore passedPlayers as a Set
         if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
           state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
@@ -512,6 +565,16 @@ const Game = (() => {
           UI.showScreen('title-screen');
           cleanup();
         }, 2000);
+        break;
+      case 'KICKED':
+        UI.showToast(msg.reason || 'You were removed by the host');
+        setTimeout(() => {
+          UI.showScreen('title-screen');
+          cleanup();
+        }, 2500);
+        break;
+      case 'HOST_MIGRATED':
+        handleHostMigrated(fromPeer, msg);
         break;
       case 'CHAT':
         UI.addChatMessage(msg.name, msg.text);
@@ -593,6 +656,7 @@ const Game = (() => {
       seat,
       state: sanitizeStateForClient(state),
       seatToPeer: seatToPeerObj,
+      hostPeerId: myPeerId,
     });
 
     // Send peer list for mesh networking
@@ -622,6 +686,9 @@ const Game = (() => {
 
     console.log('[Host] Restoring', msg.name, 'to seat', seat);
 
+    // Read dcInfo BEFORE deleting the record — earlier version dropped the hand
+    const dcInfo = disconnectedPlayers.get(msg.playerId);
+
     // Restore player from AI bot
     player.name = msg.name;
     player.peerId = fromPeer;
@@ -631,13 +698,14 @@ const Game = (() => {
 
     peerToSeat.set(fromPeer, seat);
     seatToPeer.set(seat, fromPeer);
-    disconnectedPlayers.delete(msg.playerId);
 
-    // Restore their hand if available
-    const dcInfo = disconnectedPlayers.get(msg.playerId);
-    if (dcInfo && dcInfo.hand && dcInfo.hand.length > 0) {
+    // Restore their hand if we saved it at disconnect time
+    if (dcInfo && Array.isArray(dcInfo.hand) && dcInfo.hand.length > 0) {
       state.hands[seat] = dcInfo.hand;
     }
+
+    // Now safe to drop the pending-reconnect record
+    disconnectedPlayers.delete(msg.playerId);
 
     // Send seat assignment with current state
     const seatToPeerObj = {};
@@ -648,6 +716,7 @@ const Game = (() => {
       seat,
       state: sanitizeStateForClient(state),
       seatToPeer: seatToPeerObj,
+      hostPeerId: myPeerId,
     });
 
     // Also send their hand privately
@@ -762,8 +831,8 @@ const Game = (() => {
     if (isSoloMode || Network.getIsHost()) {
       processBid(mySeat, bid);
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'BID', bid });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'BID', bid });
     }
   }
 
@@ -856,8 +925,8 @@ const Game = (() => {
     if (isSoloMode || Network.getIsHost()) {
       processTrumpSelect(suit);
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'TRUMP_SELECT', suit });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'TRUMP_SELECT', suit });
     }
   }
 
@@ -898,8 +967,8 @@ const Game = (() => {
         hand.splice(cardIdx, 1);
         UI.updateAll(state, mySeat);
       }
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'PLAY_CARD', cardId });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'PLAY_CARD', cardId });
     }
   }
 
@@ -923,7 +992,8 @@ const Game = (() => {
 
     // Broadcast card played to all clients (simpler than HAND_UPDATE)
     if (!isSoloMode) {
-      Network.broadcast({ type: 'CARD_PLAYED', seat, cardId });
+      cardPlaySeqCounter++;
+      Network.broadcast({ type: 'CARD_PLAYED', seat, cardId, seq: cardPlaySeqCounter });
     }
 
     // Add to current trick
@@ -1040,9 +1110,18 @@ const Game = (() => {
 
   function handleExtendTimer(fromPeer, msg) {
     const seat = peerToSeat.get(fromPeer);
-    if (!seat && seat !== 0) return;
+    if (seat === undefined) return;
     if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
     state.currentRound.raiseTimer += 10;
+    state.currentRound.raiseDeadline = (state.currentRound.raiseDeadline || Date.now()) + 10000;
+    // Restart the host-side timeout to match the new deadline
+    if (raiseTimer) {
+      clearTimeout(raiseTimer);
+      raiseTimer = setTimeout(() => {
+        console.log('[Host] Raise timer expired - automatically no raise');
+        processNoRaise();
+      }, Math.max(0, state.currentRound.raiseDeadline - Date.now()));
+    }
     broadcastState();
     UI.updateAll(state, mySeat);
   }
@@ -1050,6 +1129,13 @@ const Game = (() => {
   function handleCardPlayed(fromPeer, msg) {
     // Host already processed this, so this is only for other clients
     if (Network.getIsHost()) return;
+    // Dedupe on (seat, cardId, seq)
+    const key = `${msg.seat}:${msg.cardId}:${msg.seq || 0}`;
+    if (playedCardSeq.has(key)) {
+      console.log('[Client] Duplicate CARD_PLAYED ignored:', key);
+      return;
+    }
+    playedCardSeq.add(key);
     // Remove the card from the player's hand on all clients
     const hand = state.hands[msg.seat];
     if (!hand) return;
@@ -1066,19 +1152,26 @@ const Game = (() => {
       broadcastState();
       UI.updateAll(state, mySeat);
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'RAISE_COMMIT', tricks });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'RAISE_COMMIT', tricks });
     }
   }
 
   function extendRaiseTimer() {
     if (isSoloMode || Network.getIsHost()) {
       state.currentRound.raiseTimer += 10;
+      state.currentRound.raiseDeadline = (state.currentRound.raiseDeadline || Date.now()) + 10000;
+      if (raiseTimer) {
+        clearTimeout(raiseTimer);
+        raiseTimer = setTimeout(() => {
+          processNoRaise();
+        }, Math.max(0, state.currentRound.raiseDeadline - Date.now()));
+      }
       broadcastState();
       UI.updateAll(state, mySeat);
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'EXTEND_TIMER' });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'EXTEND_TIMER' });
     }
   }
 
@@ -1086,8 +1179,8 @@ const Game = (() => {
     if (isSoloMode || Network.getIsHost()) {
       processRaise(newBid);
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'RAISE_BID', newBid });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'RAISE_BID', newBid });
     }
   }
 
@@ -1095,8 +1188,8 @@ const Game = (() => {
     if (isSoloMode || Network.getIsHost()) {
       processNoRaise();
     } else {
-      const hostPeerId = seatToPeer.get(0) || Network.getConnectedPeers()[0];
-      Network.sendTo(hostPeerId, { type: 'NO_RAISE' });
+      const hostPeerId = getHostPeerId();
+      if (hostPeerId) Network.sendTo(hostPeerId, { type: 'NO_RAISE' });
     }
   }
 
@@ -1213,8 +1306,20 @@ const Game = (() => {
     if (!player) return;
     // If human player (not AI, not host), start turn timeout
     if (!player.isAI) {
-      if (currentSeat !== mySeat) startTurnTimer();
+      if (currentSeat !== mySeat) {
+        startTurnTimer();
+        // Broadcast the fresh turnDeadline so every client renders a live countdown
+        if (!isSoloMode) broadcastState();
+      } else if (state.currentRound && state.currentRound.turnDeadline) {
+        // Clear any stale deadline that would keep a countdown running past our turn
+        state.currentRound.turnDeadline = null;
+        if (!isSoloMode) broadcastState();
+      }
       return;
+    }
+    // For AI turns, drop any leftover deadline so the UI clears its countdown
+    if (state.currentRound && state.currentRound.turnDeadline) {
+      state.currentRound.turnDeadline = null;
     }
 
     // Different delays for different phases
@@ -1842,8 +1947,194 @@ const Game = (() => {
 
   function broadcastState() {
     if (isSoloMode) return; // No network in solo mode
+    // Bump monotonic version so clients can reject stale/out-of-order updates
+    state.version = (state.version || 0) + 1;
     const cleanState = sanitizeStateForClient(state);
     Network.broadcast({ type: 'STATE_UPDATE', state: cleanState });
+  }
+
+  // === HOST MIGRATION ===
+  // Deterministic election: on host disconnect, all surviving clients run the same
+  // algorithm to pick the next host: lowest-numbered seat whose player is a connected
+  // human. If that's me, I promote myself. If not, I keep waiting for HOST_MIGRATED
+  // from the elected peer.
+  function electNextHost(departedHostSeat) {
+    if (!state || !state.players) return null;
+    for (let s = 0; s < 6; s++) {
+      if (s === departedHostSeat) continue;
+      const p = state.players[s];
+      if (p && !p.isAI && p.connected !== false && p.peerId) {
+        return { seat: s, peerId: p.peerId, playerId: p.id, name: p.name };
+      }
+    }
+    return null;
+  }
+
+  let migrationInProgress = false;
+
+  function attemptHostMigration(departedHostPeerId) {
+    if (Network.getIsHost()) return; // shouldn't happen
+    if (migrationInProgress) return;
+    migrationInProgress = true;
+
+    // Figure out which seat the departed host held
+    let departedSeat = -1;
+    if (state && state.players) {
+      for (let s = 0; s < 6; s++) {
+        if (state.players[s] && state.players[s].peerId === departedHostPeerId) {
+          departedSeat = s; break;
+        }
+      }
+    }
+
+    const elected = electNextHost(departedSeat);
+    if (!elected) {
+      // No survivor to promote — fall back to "host disconnected" ending
+      UI.showToast('Host disconnected \u2014 no eligible player to take over');
+      setTimeout(() => {
+        UI.showScreen('title-screen');
+        cleanup();
+      }, 2500);
+      return;
+    }
+
+    // Mark the departed host's seat as a bot so the game can continue
+    if (departedSeat >= 0 && state.players[departedSeat]) {
+      const departed = state.players[departedSeat];
+      departed.connected = false;
+      departed.isAI = true;
+      departed.originalName = departed.originalName || departed.name;
+      departed.name = `${departed.originalName} (Bot)`;
+    }
+
+    UI.showToast(`Host lost \u2014 promoting ${elected.name} to host...`);
+
+    if (elected.peerId === myPeerId) {
+      promoteSelfToHost(elected.seat, departedSeat);
+    } else {
+      // Trust the elected peer to broadcast HOST_MIGRATED shortly.
+      // Pre-set currentHostPeerId so any outgoing messages go to the new host.
+      currentHostPeerId = elected.peerId;
+      // Keep migrationInProgress = true; will be cleared when HOST_MIGRATED arrives.
+      // Safety: if we don't hear from the new host in 10s, drop to title.
+      setTimeout(() => {
+        if (migrationInProgress) {
+          UI.showToast('Host migration timed out');
+          UI.showScreen('title-screen');
+          cleanup();
+        }
+      }, 10000);
+    }
+  }
+
+  function promoteSelfToHost(newSeat, departedSeat) {
+    console.log('[Game] Promoting self to host');
+    // Move my seat if the elected seat differs — usually it's the same.
+    mySeat = newSeat;
+    Network.promoteToHost();
+
+    // Rebuild peerToSeat / seatToPeer from the current player table
+    peerToSeat.clear();
+    seatToPeer.clear();
+    for (let s = 0; s < 6; s++) {
+      const p = state.players[s];
+      if (p && p.peerId && !p.isAI && p.connected !== false) {
+        peerToSeat.set(p.peerId, s);
+        seatToPeer.set(s, p.peerId);
+      }
+    }
+    // Put myself in maps too
+    peerToSeat.set(myPeerId, mySeat);
+    seatToPeer.set(mySeat, myPeerId);
+    currentHostPeerId = myPeerId;
+    state.hostPlayerId = myPlayerId;
+
+    // Swap listeners: stop client-side listeners, install host-side ones
+    setupHostListeners();
+
+    // Announce migration to everyone else
+    const seatToPeerObj = {};
+    for (const [s, p] of seatToPeer) seatToPeerObj[s] = p;
+    Network.broadcast({
+      type: 'HOST_MIGRATED',
+      hostPeerId: myPeerId,
+      hostSeat: mySeat,
+      departedSeat,
+      state: sanitizeStateForClient(state),
+      seatToPeer: seatToPeerObj,
+    });
+
+    // Continue the current turn/phase from the new host's authority
+    migrationInProgress = false;
+    broadcastState();
+    // If it's someone else's turn to act (or a bot's), re-arm AI/turn timers
+    if (state.currentRound && state.phase !== 'WAITING' && state.phase !== 'GAME_OVER') {
+      checkAITurn();
+    }
+    UI.showToast('You are now the host');
+  }
+
+  function handleHostMigrated(fromPeer, msg) {
+    if (!msg || !msg.hostPeerId) return;
+    // Only accept from the peer we elected (or any peer if we hadn't elected yet)
+    console.log('[Client] Host migrated to', msg.hostPeerId, 'seat', msg.hostSeat);
+
+    currentHostPeerId = msg.hostPeerId;
+    if (msg.state) {
+      const myHand = state?.hands?.[mySeat];
+      state = msg.state;
+      if (myHand && myHand.length > 0 && (!state.hands[mySeat] || state.hands[mySeat].length === 0)) {
+        state.hands[mySeat] = myHand;
+      }
+      if (state.currentRound && Array.isArray(state.currentRound.passedPlayers)) {
+        state.currentRound.passedPlayers = new Set(state.currentRound.passedPlayers);
+      }
+      lastAppliedStateVersion = state.version || lastAppliedStateVersion;
+    }
+    if (msg.seatToPeer) {
+      seatToPeer.clear();
+      for (const [seat, peerId] of Object.entries(msg.seatToPeer)) {
+        seatToPeer.set(Number(seat), peerId);
+      }
+    }
+    migrationInProgress = false;
+    UI.showToast('Host migrated \u2014 game continues');
+    if (state.phase === 'WAITING') UI.updateLobby(state, mySeat);
+    else UI.updateAll(state, mySeat);
+  }
+
+  // Host-only: kick a player. Converts the seat to a bot and notifies the kicked peer.
+  function kickPlayer(seat) {
+    if (!Network.getIsHost()) return;
+    if (seat === mySeat) return;
+    const player = state.players[seat];
+    if (!player || player.isAI) return;
+    const kickedPeer = player.peerId;
+    const kickedName = player.originalName || player.name;
+
+    // Do NOT preserve for reconnect — a kick is intentional.
+    disconnectedPlayers.delete(player.id);
+
+    player.connected = false;
+    player.isAI = true;
+    player.originalName = kickedName;
+    player.name = `${kickedName} (Bot)`;
+    if (kickedPeer) {
+      peerToSeat.delete(kickedPeer);
+      try { Network.sendTo(kickedPeer, { type: 'KICKED', reason: 'Removed by host' }); } catch(e) {}
+    }
+    seatToPeer.delete(seat);
+
+    Network.broadcast({ type: 'PLAYER_LEFT', seat, name: kickedName });
+    broadcastState();
+    if (state.phase === 'WAITING') UI.updateLobby(state, mySeat);
+    UI.showToast(`${kickedName} was kicked`);
+
+    // If it was their turn, keep the game moving
+    if (state.currentRound && state.currentRound.currentPlayer === seat) {
+      clearTurnTimer();
+      setTimeout(() => checkAITurn(), 500);
+    }
   }
 
   // Graceful leave — notify peers before closing
@@ -1855,15 +2146,25 @@ const Game = (() => {
     UI.showScreen('title-screen');
   }
 
-  // Browser close / navigate away — best-effort notify
-  window.addEventListener('beforeunload', () => {
-    if (state && Network.getPeerId()) {
-      if (Network.getIsHost()) {
-        try { Network.broadcast({ type: 'HOST_CLOSED' }); } catch(e) {}
-      }
-      Network.destroy();
+  // Browser close / navigate away — best-effort notify.
+  // We fire on both 'pagehide' and 'beforeunload' because Safari mobile
+  // suspends before beforeunload but fires pagehide reliably.
+  const gracefulExit = () => {
+    if (!state || !Network.getPeerId()) return;
+    if (Network.getIsHost()) {
+      // Host quitting cleanly — clients should end the game (not migrate).
+      try { Network.broadcast({ type: 'HOST_CLOSED' }); } catch(e) {}
+    } else {
+      // Client leaving cleanly — tell everyone so they don't wait for
+      // the ~12s heartbeat timeout to detect the drop.
+      Network.sendByeBestEffort();
     }
-  });
+    // Do NOT call Network.destroy() here — that races with the in-flight
+    // send. The browser closing the tab tears down the WebRTC channels
+    // anyway; explicit destroy would abort the goodbye before it flushes.
+  };
+  window.addEventListener('beforeunload', gracefulExit);
+  window.addEventListener('pagehide', gracefulExit);
 
   return {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
@@ -1871,5 +2172,6 @@ const Game = (() => {
     makeBid, selectTrump, playCard,
     raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji,
     stopAINameRotation,
+    kickPlayer,
   };
 })();

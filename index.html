@@ -34,6 +34,29 @@
   <link rel="stylesheet" href="./style.css?v=14">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <script>
+    // Production configuration — static site on Vercel, WebRTC signaling via
+    // the shared PeerJS cloud (free, no signup), TURN relay via the free
+    // public OpenRelay pool.
+    //
+    // If PeerJS cloud gets flaky at scale, see DEPLOYMENT.md for how to run
+    // your own broker on Render/Fly.io and swap the peerHost/peerPort/peerPath
+    // fields below.
+    window.NATTICE_CONFIG = {
+      // Public TURN servers (OpenRelay / Metered) — free, no signup, well-known
+      // community credentials. Ports 80/443 + TCP + TLS let us punch through
+      // most corporate, mobile, and hotel firewalls that block UDP.
+      // If you exceed the ~20 GB/mo public pool, sign up at metered.ca for
+      // your own free credentials and replace these entries.
+      turnServers: [
+        { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
+      ],
+    };
+  </script>
 </head>
 
 <body>

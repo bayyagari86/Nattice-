@@ -1,7 +1,10 @@
-.DS_Store
-*.log
-node_modules/
-windsurf_deployment.yaml
 
 # Local Netlify folder
+*.log
+.DS_Store
 .netlify
+node_modules/
+package-lock.json
+tests/vendor/
+windsurf_deployment.yaml
+.vercel
