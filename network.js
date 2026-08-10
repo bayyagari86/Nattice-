@@ -288,6 +288,15 @@ const Network = (() => {
   function getConnectedPeers() { return Array.from(connections.keys()); }
   function getPeerCount() { return connections.size; }
 
+  // Promote this peer to host role (used by host-migration).
+  // Does NOT re-open a signaling channel or change peerId — clients learn
+  // the new host's peerId out-of-band via a HOST_MIGRATED message and route
+  // through the existing mesh connections.
+  function promoteToHost() {
+    isHost = true;
+    startHeartbeat();
+  }
+
   function destroy() {
     stopHeartbeat();
     for (const conn of connections.values()) conn.close();
@@ -303,6 +312,7 @@ const Network = (() => {
     onMessage, onPeerJoin, onPeerLeave, onConnected, onDisconnected,
     startHeartbeat, stopHeartbeat,
     getPeerId, getIsHost, getConnectedPeers, getPeerCount,
+    promoteToHost,
     destroy,
   };
 })();
