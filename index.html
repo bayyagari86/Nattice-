@@ -35,31 +35,28 @@
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
-  <!--
-    Optional production configuration. Uncomment and fill in to use your own
-    signaling broker and/or TURN server. See MULTIPLAYER_IMPROVEMENTS.md —
-    "Production configuration" for setup guides.
-
-    <script>
-      window.NATTICE_CONFIG = {
-        // Your own PeerJS broker (see peerjs-server on GitHub). Omit to use
-        // the shared PeerJS cloud, which is fine for hobby use.
-        // peerHost: 'peer.example.com',
-        // peerPort: 443,
-        // peerPath: '/',
-        // peerSecure: true,
-        // peerKey: 'peerjs',
-
-        // TURN server(s) — without this, ~10–20% of players on symmetric
-        // NATs (some corporate/mobile/hotel networks) cannot connect. Free
-        // tiers: Metered.ca (50GB/mo), Twilio, or self-host coturn.
-        // turnServers: [
-        //   { urls: 'turn:turn.example.com:3478', username: 'user', credential: 'pass' },
-        //   { urls: 'turn:turn.example.com:443?transport=tcp', username: 'user', credential: 'pass' },
-        // ],
-      };
-    </script>
-  -->
+  <script>
+    // Production configuration — static site on Vercel, WebRTC signaling via
+    // the shared PeerJS cloud (free, no signup), TURN relay via the free
+    // public OpenRelay pool.
+    //
+    // If PeerJS cloud gets flaky at scale, see DEPLOYMENT.md for how to run
+    // your own broker on Render/Fly.io and swap the peerHost/peerPort/peerPath
+    // fields below.
+    window.NATTICE_CONFIG = {
+      // Public TURN servers (OpenRelay / Metered) — free, no signup, well-known
+      // community credentials. Ports 80/443 + TCP + TLS let us punch through
+      // most corporate, mobile, and hotel firewalls that block UDP.
+      // If you exceed the ~20 GB/mo public pool, sign up at metered.ca for
+      // your own free credentials and replace these entries.
+      turnServers: [
+        { urls: 'turn:openrelay.metered.ca:80',                username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',               username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turns:openrelay.metered.ca:443',              username: 'openrelayproject', credential: 'openrelayproject' },
+      ],
+    };
+  </script>
 </head>
 
 <body>

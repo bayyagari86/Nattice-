@@ -1,0 +1,20 @@
+node_modules
+tests
+package.json
+package-lock.json
+.git
+.github
+netlify.toml
+MULTIPLAYER_IMPROVEMENTS.md
+DEPLOYMENT.md
+TESTING.md
+*.log
+.DS_Store
+# Test/scratch HTML pages — not part of the game
+browser-automation.html
+e2e-test.html
+load-test.html
+multi-room-test.html
+realistic-test.html
+simple-load-test.html
+test-cards.html

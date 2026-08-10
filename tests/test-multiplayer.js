@@ -404,9 +404,15 @@ test('TURN server config is honored', () => {
   assert(/NATTICE_CONFIG\.turnServers/.test(src), 'turnServers config missing');
   assert(/turnUrl/.test(src), 'turnUrl URL param missing');
 });
-test('Own PeerJS broker via NATTICE_CONFIG', () => {
+test('PeerJS cloud connect has retry logic', () => {
   const src = read('network.js');
-  assert(/NATTICE_CONFIG.*peerHost|c\.peerHost/.test(src), 'peerHost config missing');
+  assert(/MAX_CONNECT_ATTEMPTS/.test(src), 'connect retry constant missing');
+  assert(/tryConnect/.test(src), 'retryable connect function missing');
+});
+test('Public TURN servers are wired into index.html', () => {
+  const src = read('index.html');
+  assert(/turnServers:/.test(src), 'turnServers config missing in index.html');
+  assert(/openrelay\.metered\.ca/.test(src), 'OpenRelay TURN URL missing');
 });
 test('broadcast snapshots connections to avoid mutation-during-iteration', () => {
   const src = read('network.js');

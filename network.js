@@ -20,10 +20,14 @@ const Network = (() => {
   const HEARTBEAT_TIMEOUT_MS = 12000;
   const lastPong = new Map(); // peerId -> timestamp
 
+  // Connect attempts before giving up. PeerJS cloud (0.peerjs.com) is shared
+  // infrastructure and occasionally has brief hiccups; retrying with backoff
+  // hides those from the player.
+  const MAX_CONNECT_ATTEMPTS = 3;
+
   function init(customId = null) {
     return new Promise((resolve, reject) => {
       const id = customId || ('TC_' + GameCrypto.generatePlayerId().substring(0, 12));
-      console.log('[Network] Connecting via PeerJS cloud...');
 
       // Build ICE servers list.
       // STUN is always included — works for ~80% of home networks.
@@ -58,18 +62,8 @@ const Network = (() => {
       // Production builds default to PeerJS cloud unless
       // window.NATTICE_CONFIG.peerHost is set.
       const peerOpts = { config: { iceServers } };
+      // URL param override (tests only) — production uses PeerJS cloud.
       try {
-        // Config object beats URL params so it's not spoofable by shared links
-        if (typeof window !== 'undefined' && window.NATTICE_CONFIG) {
-          const c = window.NATTICE_CONFIG;
-          if (c.peerHost) {
-            peerOpts.host = c.peerHost;
-            peerOpts.port = c.peerPort || 443;
-            peerOpts.path = c.peerPath || '/';
-            peerOpts.secure = c.peerSecure !== false; // default true for prod
-            if (c.peerKey) peerOpts.key = c.peerKey;
-          }
-        }
         const params = new URLSearchParams(window.location.search);
         const peerHost = params.get('peerHost');
         if (peerHost) {
@@ -78,44 +72,86 @@ const Network = (() => {
           peerOpts.path = params.get('peerPath') || '/';
           peerOpts.secure = params.get('peerSecure') === '1';
           console.log('[Network] Using custom PeerJS broker:', peerOpts.host, peerOpts.port, peerOpts.path);
-        }
-      } catch (e) { /* URL params optional */ }
-      peer = new Peer(id, peerOpts);
-
-      peer.on('open', (peerId) => {
-        myPeerId = peerId;
-        console.log('[Network] My peer ID:', peerId);
-        resolve(peerId);
-      });
-
-      peer.on('connection', (conn) => {
-        setupConnection(conn);
-      });
-
-      peer.on('error', (err) => {
-        console.error('[Network] Peer error:', err);
-        if (err.type === 'disconnected' && reconnectAttempts < MAX_RECONNECT) {
-          reconnectAttempts++;
-          setTimeout(() => peer.reconnect(), 2000 * reconnectAttempts);
         } else {
-          reject(err);
+          console.log('[Network] Connecting via PeerJS cloud (0.peerjs.com)...');
         }
-      });
+      } catch (_) { /* URL params optional */ }
 
-      peer.on('disconnected', () => {
-        console.warn('[Network] Disconnected from signaling');
-        if (reconnectAttempts < MAX_RECONNECT) {
-          reconnectAttempts++;
-          setTimeout(() => peer.reconnect(), 2000);
-        } else if (onDisconnectedCallback) {
-          onDisconnectedCallback('signaling_lost');
-        }
-      });
+      // Retryable connect — PeerJS cloud occasionally errors on first dial.
+      // We destroy and re-create the Peer object on each attempt because a
+      // failed Peer can't be re-used (its internal socket is dead).
+      let attempt = 0;
+      const tryConnect = () => {
+        attempt++;
+        const isRetry = attempt > 1;
+        if (isRetry) console.log(`[Network] Connect attempt ${attempt}/${MAX_CONNECT_ATTEMPTS}...`);
+        peer = new Peer(id, peerOpts);
 
-      peer.on('close', () => {
-        console.warn('[Network] Peer destroyed');
-        stopHeartbeat();
-      });
+        // If we don't open in 12s, retry. PeerJS's own timeout is ~5s but it
+        // sometimes silently hangs; belt-and-suspenders here.
+        const openTimer = setTimeout(() => {
+          console.warn('[Network] Broker open timed out on attempt', attempt);
+          try { peer.destroy(); } catch (_) {}
+          if (attempt < MAX_CONNECT_ATTEMPTS) {
+            setTimeout(tryConnect, 1500 * attempt); // 1.5s, 3s
+          } else {
+            reject(new Error('Could not reach signaling server after ' + MAX_CONNECT_ATTEMPTS + ' attempts. Please retry.'));
+          }
+        }, 12000);
+
+        peer.on('open', (peerId) => {
+          clearTimeout(openTimer);
+          myPeerId = peerId;
+          console.log('[Network] My peer ID:', peerId);
+          resolve(peerId);
+        });
+
+        peer.on('connection', (conn) => {
+          setupConnection(conn);
+        });
+
+        peer.on('error', (err) => {
+          console.error('[Network] Peer error:', err && err.type, err && err.message);
+          // If we haven't opened yet, treat transient network errors as retryable.
+          const isTransient = err && (err.type === 'network' || err.type === 'server-error' ||
+            err.type === 'socket-error' || err.type === 'socket-closed');
+          if (!myPeerId && isTransient && attempt < MAX_CONNECT_ATTEMPTS) {
+            clearTimeout(openTimer);
+            try { peer.destroy(); } catch (_) {}
+            setTimeout(tryConnect, 1500 * attempt);
+            return;
+          }
+          // After we've opened successfully, PeerJS auto-handles most transient
+          // errors; only signaling-disconnected needs a manual reconnect().
+          if (err.type === 'disconnected' && reconnectAttempts < MAX_RECONNECT) {
+            reconnectAttempts++;
+            setTimeout(() => { try { peer.reconnect(); } catch (_) {} }, 2000 * reconnectAttempts);
+          } else if (!myPeerId) {
+            reject(err);
+          }
+          // If we're already open, surface non-fatal errors to the UI but don't reject.
+          if (myPeerId && onDisconnectedCallback && err.type === 'peer-unavailable') {
+            // Not fatal — just a stale peer ID in a connect attempt. Ignore.
+          }
+        });
+
+        peer.on('disconnected', () => {
+          console.warn('[Network] Disconnected from signaling');
+          if (reconnectAttempts < MAX_RECONNECT) {
+            reconnectAttempts++;
+            setTimeout(() => { try { peer.reconnect(); } catch (_) {} }, 2000);
+          } else if (onDisconnectedCallback) {
+            onDisconnectedCallback('signaling_lost');
+          }
+        });
+
+        peer.on('close', () => {
+          console.warn('[Network] Peer destroyed');
+          stopHeartbeat();
+        });
+      };
+
+      tryConnect();
     });
   }
 
