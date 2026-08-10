@@ -2146,15 +2146,25 @@ const Game = (() => {
     UI.showScreen('title-screen');
   }
 
-  // Browser close / navigate away — best-effort notify
-  window.addEventListener('beforeunload', () => {
-    if (state && Network.getPeerId()) {
-      if (Network.getIsHost()) {
-        try { Network.broadcast({ type: 'HOST_CLOSED' }); } catch(e) {}
-      }
-      Network.destroy();
+  // Browser close / navigate away — best-effort notify.
+  // We fire on both 'pagehide' and 'beforeunload' because Safari mobile
+  // suspends before beforeunload but fires pagehide reliably.
+  const gracefulExit = () => {
+    if (!state || !Network.getPeerId()) return;
+    if (Network.getIsHost()) {
+      // Host quitting cleanly — clients should end the game (not migrate).
+      try { Network.broadcast({ type: 'HOST_CLOSED' }); } catch(e) {}
+    } else {
+      // Client leaving cleanly — tell everyone so they don't wait for
+      // the ~12s heartbeat timeout to detect the drop.
+      Network.sendByeBestEffort();
     }
-  });
+    // Do NOT call Network.destroy() here — that races with the in-flight
+    // send. The browser closing the tab tears down the WebRTC channels
+    // anyway; explicit destroy would abort the goodbye before it flushes.
+  };
+  window.addEventListener('beforeunload', gracefulExit);
+  window.addEventListener('pagehide', gracefulExit);
 
   return {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,

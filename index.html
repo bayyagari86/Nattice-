@@ -34,6 +34,32 @@
   <link rel="stylesheet" href="./style.css?v=14">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!--
+    Optional production configuration. Uncomment and fill in to use your own
+    signaling broker and/or TURN server. See MULTIPLAYER_IMPROVEMENTS.md —
+    "Production configuration" for setup guides.
+
+    <script>
+      window.NATTICE_CONFIG = {
+        // Your own PeerJS broker (see peerjs-server on GitHub). Omit to use
+        // the shared PeerJS cloud, which is fine for hobby use.
+        // peerHost: 'peer.example.com',
+        // peerPort: 443,
+        // peerPath: '/',
+        // peerSecure: true,
+        // peerKey: 'peerjs',
+
+        // TURN server(s) — without this, ~10–20% of players on symmetric
+        // NATs (some corporate/mobile/hotel networks) cannot connect. Free
+        // tiers: Metered.ca (50GB/mo), Twilio, or self-host coturn.
+        // turnServers: [
+        //   { urls: 'turn:turn.example.com:3478', username: 'user', credential: 'pass' },
+        //   { urls: 'turn:turn.example.com:443?transport=tcp', username: 'user', credential: 'pass' },
+        // ],
+      };
+    </script>
+  -->
 </head>
 
 <body>

@@ -25,15 +25,62 @@ const Network = (() => {
       const id = customId || ('TC_' + GameCrypto.generatePlayerId().substring(0, 12));
       console.log('[Network] Connecting via PeerJS cloud...');
 
-      peer = new Peer(id, {
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-          ]
+      // Build ICE servers list.
+      // STUN is always included — works for ~80% of home networks.
+      // TURN (relay) is added when configured via:
+      //   1. window.NATTICE_CONFIG.turnServers = [{urls, username, credential}, ...]
+      //   2. URL params: ?turnUrl=turn:host:port&turnUser=U&turnCred=C
+      // Without TURN, users on symmetric NATs (some corporate/mobile/hotel
+      // networks) may not be able to connect. Recommended free tiers:
+      // Metered.ca, Twilio, or self-host coturn on a $5 VPS.
+      const iceServers = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+      ];
+      try {
+        if (typeof window !== 'undefined' && window.NATTICE_CONFIG && Array.isArray(window.NATTICE_CONFIG.turnServers)) {
+          for (const s of window.NATTICE_CONFIG.turnServers) iceServers.push(s);
         }
-      });
+        const params = new URLSearchParams(window.location.search);
+        const turnUrl = params.get('turnUrl');
+        if (turnUrl) {
+          iceServers.push({
+            urls: turnUrl,
+            username: params.get('turnUser') || undefined,
+            credential: params.get('turnCred') || undefined,
+          });
+        }
+      } catch (_) { /* ICE config optional */ }
+
+      // Development / test hook: allow overriding the PeerJS broker via URL
+      // params so a local `peerjs-server` can be used in automated tests.
+      // Production builds default to PeerJS cloud unless
+      // window.NATTICE_CONFIG.peerHost is set.
+      const peerOpts = { config: { iceServers } };
+      try {
+        // Config object beats URL params so it's not spoofable by shared links
+        if (typeof window !== 'undefined' && window.NATTICE_CONFIG) {
+          const c = window.NATTICE_CONFIG;
+          if (c.peerHost) {
+            peerOpts.host = c.peerHost;
+            peerOpts.port = c.peerPort || 443;
+            peerOpts.path = c.peerPath || '/';
+            peerOpts.secure = c.peerSecure !== false; // default true for prod
+            if (c.peerKey) peerOpts.key = c.peerKey;
+          }
+        }
+        const params = new URLSearchParams(window.location.search);
+        const peerHost = params.get('peerHost');
+        if (peerHost) {
+          peerOpts.host = peerHost;
+          peerOpts.port = Number(params.get('peerPort') || '9000');
+          peerOpts.path = params.get('peerPath') || '/';
+          peerOpts.secure = params.get('peerSecure') === '1';
+          console.log('[Network] Using custom PeerJS broker:', peerOpts.host, peerOpts.port, peerOpts.path);
+        }
+      } catch (e) { /* URL params optional */ }
+      peer = new Peer(id, peerOpts);
 
       peer.on('open', (peerId) => {
         myPeerId = peerId;
@@ -73,17 +120,31 @@ const Network = (() => {
   }
 
   function setupConnection(conn) {
-    conn.on('open', () => {
+    // Idempotency guard: setupConnection can be called from multiple paths
+    // (peer.on('connection'), joinRoom, connectToPeer, promoteSelfToHost's
+    // rebuild) and we do NOT want to double-register listeners or double-fire
+    // onPeerJoinCallback for the same connection.
+    if (conn._natticeSetup) return;
+    conn._natticeSetup = true;
+
+    const announceJoin = () => {
+      // Guard against multiple announcements (open event AND immediate branch)
+      if (conn._natticeJoined) return;
+      conn._natticeJoined = true;
       connections.set(conn.peer, conn);
       lastPong.set(conn.peer, Date.now());
       console.log('[Network] Peer connected:', conn.peer);
       if (onPeerJoinCallback) onPeerJoinCallback(conn.peer);
-    });
+    };
+
+    conn.on('open', announceJoin);
 
     conn.on('data', async (data) => {
       try {
-        // Promote this connection — it delivered data successfully
-        connections.set(conn.peer, conn);
+        // Ensure we've registered the connection even if 'open' didn't fire
+        // (PeerJS occasionally delivers data before the open event on
+        // symmetric-NAT paths).
+        if (!conn._natticeJoined) announceJoin();
         lastPong.set(conn.peer, Date.now());
         const decrypted = roomKey ? await GameCrypto.decrypt(data, roomKey) : data;
         const msg = JSON.parse(decrypted);
@@ -93,30 +154,57 @@ const Network = (() => {
           return;
         }
         if (msg.type === '__PONG__') return;
+        // Graceful leave announcement from peer — treat identically to close
+        if (msg.type === '__BYE__') {
+          try { conn.close(); } catch (_) {}
+          return; // 'close' handler will fire onPeerLeaveCallback
+        }
         if (onMessageCallback) onMessageCallback(conn.peer, msg);
       } catch (e) {
         console.error('[Network] Decrypt/parse failed:', e);
       }
     });
 
-    conn.on('close', () => {
+    let closeAnnounced = false;
+    const announceClose = () => {
+      if (closeAnnounced) return;
+      closeAnnounced = true;
       connections.delete(conn.peer);
       lastPong.delete(conn.peer);
       console.log('[Network] Peer disconnected:', conn.peer);
       if (onPeerLeaveCallback) onPeerLeaveCallback(conn.peer);
-    });
+    };
+    conn.on('close', announceClose);
+    // PeerJS 1.x fires 'iceStateChanged' with 'disconnected' or 'failed'
+    // BEFORE 'close' — treat those as a leave too, so we don't wait for
+    // the WebRTC teardown grace period.
+    if (conn.peerConnection) {
+      conn.peerConnection.addEventListener('iceconnectionstatechange', () => {
+        const st = conn.peerConnection.iceConnectionState;
+        if (st === 'failed' || st === 'closed' || st === 'disconnected') {
+          // Give WebRTC one chance to recover from 'disconnected'
+          if (st === 'disconnected') {
+            setTimeout(() => {
+              if (conn.peerConnection && conn.peerConnection.iceConnectionState === 'disconnected') {
+                try { conn.close(); } catch (_) {}
+                announceClose();
+              }
+            }, 3000);
+          } else {
+            try { conn.close(); } catch (_) {}
+            announceClose();
+          }
+        }
+      });
+    }
 
     conn.on('error', (err) => {
       console.error('[Network] Conn error:', conn.peer, err);
     });
 
-    // If already open (e.g. called after open event), store immediately
-    if (conn.open) {
-      connections.set(conn.peer, conn);
-      lastPong.set(conn.peer, Date.now());
-      console.log('[Network] Peer connected (immediate):', conn.peer);
-      if (onPeerJoinCallback) onPeerJoinCallback(conn.peer);
-    }
+    // If already open (e.g. called after open event fired), announce now.
+    // announceJoin() is idempotent so the 'open' listener above is a no-op.
+    if (conn.open) announceJoin();
   }
 
   // Heartbeat: host pings all clients, detects dead connections
@@ -245,35 +333,71 @@ const Network = (() => {
   async function connectToPeer(peerId) {
     if (connections.has(peerId) || peerId === myPeerId) return;
     return new Promise((resolve, reject) => {
-      const conn = peer.connect(peerId, { reliable: true });
-      conn.on('open', () => {
-        connections.set(peerId, conn);
-        setupConnection(conn);
-        resolve(conn);
-      });
-      conn.on('error', reject);
-      setTimeout(() => reject(new Error('Connection timeout')), 10000);
+      const conn = peer.connect(peerId, { reliable: true, serialization: 'json' });
+      // Register listeners FIRST (setupConnection is idempotent and safe to
+      // call before 'open' — it uses conn.on('open') itself).
+      setupConnection(conn);
+      let done = false;
+      const onOpen = () => { if (done) return; done = true; resolve(conn); };
+      conn.on('open', onOpen);
+      conn.on('error', (err) => { if (done) return; done = true; reject(err); });
+      setTimeout(() => { if (done) return; done = true; reject(new Error('Connection timeout')); }, 10000);
     });
   }
 
   async function sendTo(peerId, message) {
     const conn = connections.get(peerId);
     if (!conn || !conn.open) {
-      console.warn('[Network] No open connection to', peerId);
+      // Suppress warning for internal heartbeat noise
+      if (message && message.type !== '__PING__' && message.type !== '__PONG__') {
+        console.warn('[Network] No open connection to', peerId);
+      }
       return;
     }
-    const json = JSON.stringify(message);
-    const encrypted = roomKey ? await GameCrypto.encrypt(json, roomKey) : json;
-    conn.send(encrypted);
+    try {
+      const json = JSON.stringify(message);
+      const encrypted = roomKey ? await GameCrypto.encrypt(json, roomKey) : json;
+      conn.send(encrypted);
+    } catch (e) {
+      console.error('[Network] sendTo failed:', peerId, e);
+    }
   }
 
   async function broadcast(message) {
-    const json = JSON.stringify(message);
-    const encrypted = roomKey ? await GameCrypto.encrypt(json, roomKey) : json;
-    for (const [peerId, conn] of connections) {
-      if (conn.open) {
-        conn.send(encrypted);
+    try {
+      const json = JSON.stringify(message);
+      const encrypted = roomKey ? await GameCrypto.encrypt(json, roomKey) : json;
+      // Snapshot connections to avoid mutation-during-iteration if a send
+      // handler triggers a close.
+      const conns = Array.from(connections.entries());
+      for (const [peerId, conn] of conns) {
+        if (conn.open) {
+          try { conn.send(encrypted); }
+          catch (e) { console.error('[Network] broadcast to', peerId, 'failed:', e); }
+        }
       }
+    } catch (e) {
+      console.error('[Network] broadcast encrypt failed:', e);
+    }
+  }
+
+  // Send a synchronous best-effort "goodbye" to every connected peer.
+  // Used from beforeunload/pagehide handlers where async work may not
+  // complete. Falls through the normal encrypted path if possible, but
+  // does not await — browsers cut off the tab within milliseconds.
+  function sendByeBestEffort() {
+    for (const [peerId, conn] of connections) {
+      if (!conn.open) continue;
+      try {
+        // Fire-and-forget: encrypt returns a promise, but we can't await.
+        // If encrypt is not ready yet, the peer will still get 'close' from
+        // the underlying WebRTC teardown — this is purely an optimization
+        // so peers don't have to wait for heartbeat timeout.
+        const p = roomKey
+          ? GameCrypto.encrypt(JSON.stringify({ type: '__BYE__' }), roomKey)
+          : Promise.resolve(JSON.stringify({ type: '__BYE__' }));
+        p.then(cipher => { try { conn.send(cipher); } catch (_) {} });
+      } catch (_) { /* best-effort */ }
     }
   }
 
@@ -308,7 +432,7 @@ const Network = (() => {
   return {
     init, createRoom, joinRoom, discoverHost,
     connectToPeer,
-    broadcast, sendTo,
+    broadcast, sendTo, sendByeBestEffort,
     onMessage, onPeerJoin, onPeerLeave, onConnected, onDisconnected,
     startHeartbeat, stopHeartbeat,
     getPeerId, getIsHost, getConnectedPeers, getPeerCount,

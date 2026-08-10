@@ -55,6 +55,72 @@ ordering guarantees, causing phantom cards / stuck hands.
 - 10-second safety timeout: if `HOST_MIGRATED` never arrives, clients
   drop to the title screen instead of hanging.
 
+## Production configuration
+
+### 1. TURN server (recommended)
+
+Without TURN, ~10–20% of players on symmetric NATs (some corporate,
+mobile, and hotel networks) cannot connect over WebRTC. Add TURN in
+`index.html`:
+
+```html
+<script>
+  window.NATTICE_CONFIG = {
+    turnServers: [
+      { urls: 'turn:turn.example.com:3478', username: 'user', credential: 'pass' },
+      { urls: 'turn:turn.example.com:443?transport=tcp', username: 'user', credential: 'pass' },
+    ],
+  };
+</script>
+```
+
+**Free/cheap TURN providers:**
+- **Metered.ca** — 50 GB/month free tier, dashboard-generated credentials.
+- **Twilio Network Traversal** — pay-as-you-go (~$0.40/GB), first ~3GB/month free.
+- **Self-host coturn** on a $5 VPS. See `https://github.com/coturn/coturn`.
+
+A card game uses ~1 KB/s per peer relayed, so even 50 GB/month covers
+thousands of hours of TURN-fallback play. Direct P2P connections (the
+common case) don't consume TURN bandwidth at all.
+
+### 2. Own PeerJS broker (optional)
+
+PeerJS cloud (`0.peerjs.com`) is free but shared and occasionally goes
+down. For production, run your own with the `peer` npm package:
+
+```js
+// server.js
+const { PeerServer } = require('peer');
+PeerServer({ port: 9000, path: '/' });
+```
+
+Deploy to any Node host (Fly.io, Railway, a VPS). Then in `index.html`:
+
+```html
+<script>
+  window.NATTICE_CONFIG = {
+    peerHost: 'peer.example.com',
+    peerPort: 443,
+    peerPath: '/',
+    peerSecure: true,  // requires TLS termination in front of the broker
+  };
+</script>
+```
+
+### 3. Network resilience (what's already in this branch)
+
+- **Graceful leave** — clients send a `__BYE__` on `beforeunload`/`pagehide`
+  so other peers don't wait for the 12s heartbeat timeout to notice.
+- **ICE state monitoring** — `iceconnectionstatechange: failed` / `closed`
+  triggers immediate leave detection; `disconnected` waits 3s for recovery.
+- **Heartbeat** — 5s ping interval, 12s eviction timeout for silent peers.
+- **Idempotent connection setup** — duplicate `open` events (which PeerJS
+  fires on some NAT paths) no longer cause double `SEAT_ASSIGNED`.
+- **Host migration** — ungraceful host drop triggers deterministic
+  election; surviving lowest-seat human takes over.
+- **Client reconnect** — disconnected clients retain their seat + hand
+  for a rejoin window.
+
 ## Testing suggestions
 
 - `multi-room-test.html` and `load-test.html` still apply. Recommended

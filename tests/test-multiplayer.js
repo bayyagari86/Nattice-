@@ -376,6 +376,44 @@ test('client peer-leave triggers attemptHostMigration when host drops', () => {
   assert(/attemptHostMigration\(peerId\)/.test(src), 'expected attemptHostMigration call on peer leave');
 });
 
+console.log('\n== Network hardening ==');
+test('Network exposes sendByeBestEffort for graceful leave', () => {
+  assert(typeof win.Network.sendByeBestEffort === 'function', 'sendByeBestEffort not exported');
+});
+test('setupConnection has idempotency guard', () => {
+  const src = read('network.js');
+  assert(/conn\._natticeSetup/.test(src), 'expected _natticeSetup guard');
+  assert(/conn\._natticeJoined/.test(src), 'expected _natticeJoined guard');
+});
+test('data handler treats __BYE__ as a close', () => {
+  const src = read('network.js');
+  assert(/msg\.type === '__BYE__'/.test(src), '__BYE__ handling missing');
+});
+test('ICE state change triggers early leave detection', () => {
+  const src = read('network.js');
+  assert(/iceconnectionstatechange/.test(src), 'ICE state listener missing');
+});
+test('beforeunload + pagehide both call gracefulExit', () => {
+  const src = read('game.js');
+  assert(/addEventListener\('beforeunload', gracefulExit\)/.test(src), 'beforeunload not wired');
+  assert(/addEventListener\('pagehide', gracefulExit\)/.test(src), 'pagehide not wired');
+  assert(/sendByeBestEffort\(\)/.test(src), 'graceful exit does not call sendByeBestEffort');
+});
+test('TURN server config is honored', () => {
+  const src = read('network.js');
+  assert(/NATTICE_CONFIG\.turnServers/.test(src), 'turnServers config missing');
+  assert(/turnUrl/.test(src), 'turnUrl URL param missing');
+});
+test('Own PeerJS broker via NATTICE_CONFIG', () => {
+  const src = read('network.js');
+  assert(/NATTICE_CONFIG.*peerHost|c\.peerHost/.test(src), 'peerHost config missing');
+});
+test('broadcast snapshots connections to avoid mutation-during-iteration', () => {
+  const src = read('network.js');
+  assert(/Snapshot connections|Array\.from\(connections\.entries\(\)\)/.test(src),
+    'broadcast should snapshot');
+});
+
 console.log('\n== Deadline-based timers ==');
 test('raise timer sets raiseDeadline (epoch ms)', () => {
   const src = read('game.js');

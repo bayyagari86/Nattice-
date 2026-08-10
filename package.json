@@ -6,13 +6,16 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node tests/test-multiplayer.js"
+    "test": "node tests/test-multiplayer.js",
+    "test:e2e": "node tests/test-e2e-webrtc.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "peer": "^1.0.2",
+    "puppeteer": "^24.43.1"
   }
 }
