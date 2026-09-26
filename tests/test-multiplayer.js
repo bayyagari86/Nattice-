@@ -72,7 +72,7 @@ function makeDom() {
     <div id="shuffle-overlay"></div>
     <div id="shuffle-text"></div>
   </body></html>`;
-  const dom = new JSDOM(html, { pretendToBeVisual: true, runScripts: 'outside-only' });
+  const dom = new JSDOM(html, { url: 'http://localhost/', pretendToBeVisual: true, runScripts: 'outside-only' });
   return dom;
 }
 
@@ -98,6 +98,8 @@ function loadModules(dom) {
       deriveRoomKey: async () => 'MOCK_KEY',
       encrypt: async (t) => t,
       decrypt: async (t) => t,
+      generateSecret: () => 'a'.repeat(64),
+      sha256Hex: async () => 'b'.repeat(64),
     };
   `;
 
@@ -317,10 +319,12 @@ test('broadcastState bumps state.version monotonically', () => {
   assert(/state\.version = \(state\.version \|\| 0\) \+ 1/.test(src),
     'expected version increment in broadcastState');
 });
-test('client STATE_UPDATE handler drops stale versions', () => {
+test('client applyState drops stale (term, version) updates', () => {
   const src = read('game.js');
-  assert(/Dropping stale STATE_UPDATE/.test(src), 'expected stale-update drop path');
-  assert(/lastAppliedStateVersion = incomingV/.test(src), 'expected version assignment');
+  const m = src.match(/function applyState[\s\S]*?^\s{2}\}/m);
+  assert(m, 'applyState not found');
+  assert(/term < lastAppliedStateTerm/.test(m[0]), 'expected lower-term rejection');
+  assert(/v <= lastAppliedStateVersion/.test(m[0]), 'expected same-term version rejection');
 });
 test('client CARD_PLAYED handler dedupes on (seat, cardId, seq)', () => {
   const src = read('game.js');
@@ -328,33 +332,41 @@ test('client CARD_PLAYED handler dedupes on (seat, cardId, seq)', () => {
   assert(/Duplicate CARD_PLAYED ignored/.test(src), 'expected dedupe log');
 });
 
-console.log('\n== Reconnect fix: hand restored before delete ==');
-test('handleRejoinRequest reads dcInfo before delete', () => {
+console.log('\n== Rejoin: seat ownership + current hand ==');
+test('handleRejoinRequest verifies SHA-256 of secret against stored tokenHash', () => {
   const src = read('game.js');
-  // Find the handleRejoinRequest block
-  const m = src.match(/function handleRejoinRequest[\s\S]*?^\s{2}\}/m);
+  const m = src.match(/async function handleRejoinRequest[\s\S]*?^\s{2}\}/m);
   assert(m, 'could not find handleRejoinRequest');
-  const body = m[0];
-  const getIdx = body.indexOf('disconnectedPlayers.get(msg.playerId)');
-  const delIdx = body.indexOf('disconnectedPlayers.delete(msg.playerId)');
-  assert(getIdx > -1 && delIdx > -1, 'expected get + delete calls');
-  assert(getIdx < delIdx, `dcInfo must be read BEFORE delete (get@${getIdx}, del@${delIdx})`);
-  // And hand restoration must reference the local dcInfo
-  assert(/dcInfo && Array\.isArray\(dcInfo\.hand\)/.test(body),
-    'expected hand restoration from dcInfo');
+  assert(/GameCrypto\.sha256Hex\(msg\.secret\)\) === player\.tokenHash/.test(m[0]), 'expected hash verification');
+  assert(!/originalSeat/.test(m[0]), 'must not trust a client-claimed seat');
+  assert(/hand: state\.hands\[seat\]/.test(m[0]), 'must send the CURRENT hand, not a stale snapshot');
+});
+test('JOIN_REQUEST cannot claim an existing playerId', () => {
+  const src = read('game.js');
+  const m = src.match(/function handleJoinRequest[\s\S]*?^\s{2}\}/m);
+  assert(/state\.players\.some\(p => p && p\.id === msg\.playerId\)/.test(m[0]), 'expected playerId collision guard');
+});
+test('session is persisted and resumable', () => {
+  assert(typeof win.Game.getSavedSession === 'function', 'getSavedSession missing');
+  assert(typeof win.Game.resumeSavedSession === 'function', 'resumeSavedSession missing');
+  win.localStorage.setItem('nattice.session.v1', JSON.stringify({ roomCode: 'ABC234', playerId: 'p', secret: 's', savedAt: Date.now() }));
+  assertEq(win.Game.getSavedSession().roomCode, 'ABC234');
+  win.localStorage.setItem('nattice.session.v1', JSON.stringify({ roomCode: 'OLD', playerId: 'p', secret: 's', savedAt: Date.now() - 4 * 3600e3 }));
+  assertEq(win.Game.getSavedSession(), null, 'expired session must be ignored');
+  win.localStorage.removeItem('nattice.session.v1');
+});
+test('deal is private: no DEAL_ALL broadcast of every hand', () => {
+  const src = read('game.js');
+  assert(!/DEAL_ALL/.test(src), 'DEAL_ALL must be gone');
+  assert(/send\(pid, \{ type: 'DEAL', state: clean, hand: hands\[s\] \}\)/.test(src), 'expected per-player DEAL');
+  assert(/clean\.hands = \[\[\], \[\], \[\], \[\], \[\], \[\]\]/.test(src), 'sanitized state must hide hands');
 });
 
-console.log('\n== Host addressing: getHostPeerId helper ==');
-test('getHostPeerId helper exists and is used for BID/TRUMP/PLAY/RAISE', () => {
+console.log('\n== Host addressing ==');
+test('client actions go through sendToHost (connection-aware)', () => {
   const src = read('game.js');
-  assert(/function getHostPeerId\(\)/.test(src), 'getHostPeerId not defined');
-  // Old seat-0 fallback should be gone from the send sites
-  const badPattern = /const hostPeerId = seatToPeer\.get\(0\) \|\| Network\.getConnectedPeers\(\)\[0\];/g;
-  const matches = src.match(badPattern);
-  assertEq(matches, null, 'stale seatToPeer.get(0) fallbacks still present');
-  // New pattern present
-  const goodMatches = src.match(/const hostPeerId = getHostPeerId\(\);/g);
-  assert(goodMatches && goodMatches.length >= 6, 'expected >=6 send sites using helper, got ' + (goodMatches && goodMatches.length));
+  const sites = src.match(/sendToHost\(\{ type: '(BID|TRUMP_SELECT|RAISE_COMMIT|EXTEND_TIMER|RAISE_BID|NO_RAISE)'/g) || [];
+  assert(sites.length >= 6, 'expected >=6 sendToHost sites, got ' + sites.length);
 });
 
 console.log('\n== Host migration wiring ==');
@@ -363,17 +375,26 @@ test('HOST_MIGRATED message type is handled on client', () => {
   assert(/case 'HOST_MIGRATED':/.test(src), 'HOST_MIGRATED case missing');
   assert(/function handleHostMigrated/.test(src), 'handler function missing');
 });
-test('promoteToHost + setupHostListeners called during promotion', () => {
+test('promotion bumps term, claims alias, and runs hand sync', () => {
   const src = read('game.js');
   const m = src.match(/function promoteSelfToHost[\s\S]*?^\s{2}\}/m);
   assert(m, 'promoteSelfToHost not found');
+  assert(/hostTerm \+= 1/.test(m[0]), 'must bump the term');
   assert(/Network\.promoteToHost\(\)/.test(m[0]), 'must call Network.promoteToHost');
-  assert(/setupHostListeners\(\)/.test(m[0]), 'must swap to host listeners');
-  assert(/type: 'HOST_MIGRATED'/.test(m[0]), 'must broadcast HOST_MIGRATED');
+  assert(/Network\.claimAlias\(alias/.test(m[0]), 'must claim the term alias');
+  assert(/handSync = \{/.test(m[0]), 'must collect hands from clients');
+  assert(/bcast\(hostMigratedMessage/.test(m[0]), 'must broadcast HOST_MIGRATED');
+});
+test('host with a lower term steps down on seeing a higher one', () => {
+  const src = read('game.js');
+  const m = src.match(/function onNetMessage[\s\S]*?^\s{2}\}/m);
+  assert(/if \(t > hostTerm\) \{[\s\S]*?stepDown\(/.test(m[0]), 'expected stepDown on higher term');
+  assert(/STALE_TERM/.test(m[0]), 'clients must reject lower-term authority');
 });
 test('client peer-leave triggers attemptHostMigration when host drops', () => {
   const src = read('game.js');
   assert(/attemptHostMigration\(peerId\)/.test(src), 'expected attemptHostMigration call on peer leave');
+  assert(/away \|\| reconnecting/.test(src), 'must not migrate when WE were the ones away');
 });
 
 console.log('\n== Network hardening ==');
@@ -430,7 +451,7 @@ test('turn timer sets turnDeadline before broadcastState', () => {
   const src = read('game.js');
   assert(/state\.currentRound\.turnDeadline = Date\.now\(\) \+ TURN_TIMEOUT_MS/.test(src),
     'expected turnDeadline set');
-  assert(/Broadcast the fresh turnDeadline/.test(src), 'expected broadcast comment');
+  assert(/share the fresh turnDeadline/.test(src), 'expected turnDeadline broadcast');
 });
 test('extendRaiseTimer also extends raiseDeadline', () => {
   const src = read('game.js');
@@ -439,7 +460,145 @@ test('extendRaiseTimer also extends raiseDeadline', () => {
 });
 
 // =====================================================================
-console.log(`\n=====================\n${pass} passed, ${fail} failed`);
-if (fail) {
-  process.exit(1);
+
+console.log('\n== Hand recovery after migration (Engine.recoverHands) ==');
+const E = win.Engine;
+function fullDeal(seed) {
+  let x = seed;
+  const rng = () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; };
+  const deck = E.createDeck();
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  return [0, 1, 2, 3, 4, 5].map(s => deck.slice(s * 9, s * 9 + 9));
 }
+// Play `n` legal cards starting from seat `leader`, updating hands + round
+function playLegal(hands, round, n) {
+  for (let k = 0; k < n; k++) {
+    const trick = round.currentTrick;
+    const seat = trick.length ? (trick[trick.length - 1].playerIndex + 1) % 6 : round.leader;
+    const isLeading = trick.length === 0;
+    const leadSuit = isLeading ? null : (trick[0].card.suit === 'joker' ? null : trick[0].card.suit);
+    const playable = E.getPlayableCards(hands[seat], leadSuit, isLeading);
+    // Prefer an off-suit card when allowed, to create observable voids
+    const card = playable[playable.length - 1];
+    hands[seat] = hands[seat].filter(c => c.id !== card.id);
+    trick.push({ playerIndex: seat, card });
+    if (trick.length === 6) {
+      round.tricks.push({ cards: trick.slice(), winner: seat });
+      round.leader = seat;
+      round.currentTrick = [];
+    }
+  }
+}
+function checkConsistent(res, round, trueHands) {
+  assert(res.ok, 'recovery failed');
+  const played = new Set();
+  for (const t of round.tricks) t.cards.forEach(e => played.add(e.card.id));
+  (round.currentTrick || []).forEach(e => played.add(e.card.id));
+  const seen = new Set();
+  for (let s = 0; s < 6; s++) {
+    assertEq(res.hands[s].length, trueHands[s].length, `seat ${s} hand size`);
+    for (const c of res.hands[s]) {
+      assert(!played.has(c.id), 'played card dealt back: ' + c.id);
+      assert(!seen.has(c.id), 'card dealt twice: ' + c.id);
+      seen.add(c.id);
+    }
+  }
+  assertEq(seen.size + played.size, 54, 'every card accounted for');
+}
+
+test('mid-trick: known hands kept exactly, unknown seats get a legal remainder', () => {
+  for (let seed = 1; seed <= 40; seed++) {
+    const hands = fullDeal(seed);
+    const round = { tricks: [], currentTrick: [], leader: seed % 6 };
+    playLegal(hands, round, 6 * 3 + (seed % 6)); // 3 tricks + partial
+    const known = { 1: hands[1], 2: hands[2], 4: hands[4] }; // 0, 3, 5 unknown (old host + bots)
+    const res = E.recoverHands(round, known);
+    checkConsistent(res, round, hands);
+    for (const s of [1, 2, 4]) {
+      assertEq(res.hands[s].map(c => c.id).sort().join(), hands[s].map(c => c.id).sort().join(), 'known hand changed at seat ' + s);
+    }
+  }
+});
+
+test('observed voids are honoured for unknown seats', () => {
+  let checked = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const hands = fullDeal(seed);
+    const round = { tricks: [], currentTrick: [], leader: 0 };
+    playLegal(hands, round, 6 * 4);
+    const voids = [0, 1, 2, 3, 4, 5].map(() => new Set());
+    for (const t of round.tricks) {
+      const lead = t.cards[0].card.suit;
+      t.cards.forEach((e, i) => { if (i > 0 && lead !== 'joker' && e.card.suit !== 'joker' && e.card.suit !== lead) voids[e.playerIndex].add(lead); });
+    }
+    const res = E.recoverHands(round, { 2: hands[2] });
+    checkConsistent(res, round, hands);
+    // The true deal satisfies all voids, so a void-respecting deal exists
+    for (let s = 0; s < 6; s++) {
+      for (const c of res.hands[s]) {
+        if (c.suit !== 'joker') assert(!voids[s].has(c.suit), `seat ${s} dealt ${c.id} despite void in ${c.suit}`);
+        checked++;
+      }
+    }
+  }
+  assert(checked > 0);
+});
+
+test('finished trick still shown on table is not double-counted', () => {
+  const hands = fullDeal(7);
+  const round = { tricks: [], currentTrick: [], leader: 0 };
+  playLegal(hands, round, 12);
+  round.currentTrick = round.tricks[round.tricks.length - 1].cards.slice(); // not cleared yet
+  const res = E.recoverHands(round, {});
+  checkConsistent(Object.assign(res), { tricks: round.tricks, currentTrick: [] }, hands);
+});
+
+test('invalid reports are ignored (played card, duplicate, oversize)', () => {
+  const hands = fullDeal(3);
+  const round = { tricks: [], currentTrick: [], leader: 0 };
+  playLegal(hands, round, 6);
+  const playedCard = round.tricks[0].cards[0].card;
+  const res = E.recoverHands(round, {
+    1: hands[1].slice(0, 7).concat([playedCard]),   // contains a played card
+    2: [hands[2][0], hands[2][0]],                    // duplicate
+    3: hands[3].concat(hands[4].slice(0, 2)),         // too many cards
+  });
+  checkConsistent(res, round, hands);
+  assert(!res.knownSeats.includes(1) && !res.knownSeats.includes(2) && !res.knownSeats.includes(3), 'bad reports must be rejected');
+});
+
+test('two players claiming the same card: second claim rejected', () => {
+  const hands = fullDeal(5);
+  const round = { tricks: [], currentTrick: [], leader: 0 };
+  const res = E.recoverHands(round, { 1: hands[1], 2: [hands[1][0]].concat(hands[2].slice(1)) });
+  checkConsistent(res, round, hands);
+  assert(res.knownSeats.includes(1) && !res.knownSeats.includes(2));
+});
+
+(async () => {
+  console.log('\n== Crypto: seat secrets (real crypto.js, WebCrypto) ==');
+  try {
+    const vm = require('vm');
+    const ctx = { crypto: globalThis.crypto, TextEncoder, TextDecoder, btoa, atob, Uint8Array };
+    vm.createContext(ctx);
+    vm.runInContext(read('crypto.js') + '\nthis.GameCrypto = GameCrypto;', ctx);
+    const GC = ctx.GameCrypto;
+    const secret = GC.generateSecret();
+    assert(/^[0-9a-f]{64}$/.test(secret), 'secret must be 256-bit hex');
+    assert(GC.generateSecret() !== secret, 'secrets must be random');
+    const h1 = await GC.sha256Hex(secret);
+    assertEq(h1, await GC.sha256Hex(secret), 'hash must be deterministic');
+    assert(h1 !== await GC.sha256Hex(GC.generateSecret()), 'different secret, different hash');
+    assertEq(await GC.sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad', 'SHA-256 test vector');
+    // Large payload round-trip (chunked base64 — no call-stack overflow)
+    const key = await GC.deriveRoomKey('ROOM42', 'TrumpCall_ROOM42');
+    const big = 'x'.repeat(300000);
+    assertEq(await GC.decrypt(await GC.encrypt(big, key), key), big, 'large encrypt/decrypt round-trip');
+    pass++; console.log('  \u2713 secret generation, SHA-256 verification, large-payload encryption');
+  } catch (e) {
+    fail++; console.log('  \u2717 crypto\n    ' + (e.stack || e.message));
+  }
+  console.log(`\n=====================\n${pass} passed, ${fail} failed`);
+  if (fail) process.exit(1);
+  process.exit(0);
+})();

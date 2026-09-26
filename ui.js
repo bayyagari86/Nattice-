@@ -118,6 +118,8 @@ const UI = (() => {
       }
     }
 
+    setupRejoin(qrRoom || auto === 'true');
+
     document.getElementById('solo-btn').addEventListener('click', startSoloGame);
     document.getElementById('host-btn').addEventListener('click', showHostDialog);
     document.getElementById('join-btn').addEventListener('click', showJoinDialog);
@@ -153,6 +155,57 @@ const UI = (() => {
       showBadgePopup(badge);
       updatePointsDisplay();
     });
+  }
+
+  // === REJOIN (after refresh / crash / closed tab) ===
+  function setupRejoin(suppressAuto) {
+    const btn = document.getElementById('rejoin-btn');
+    const session = Game.getSavedSession && Game.getSavedSession();
+    if (!btn) return;
+    if (!session) { btn.style.display = 'none'; return; }
+    btn.style.display = 'block';
+    btn.textContent = `Rejoin game ${session.roomCode}`;
+    btn.onclick = () => rejoinSaved();
+    // Fresh session (e.g. an accidental refresh mid-game) → rejoin at once
+    if (!suppressAuto && Date.now() - session.savedAt < 10 * 60 * 1000) {
+      setTimeout(rejoinSaved, 300);
+    }
+  }
+
+  let rejoinInFlight = false;
+  function rejoinSaved() {
+    if (rejoinInFlight) return;
+    rejoinInFlight = true;
+    const btn = document.getElementById('rejoin-btn');
+    showScreen('lobby-screen');
+    document.getElementById('lobby-status').textContent = 'Rejoining your game...';
+    Game.resumeSavedSession()
+      .then(() => { if (btn) btn.style.display = 'none'; })
+      .catch(err => {
+        showToast(err.message || 'Could not rejoin');
+        Game.clearSession();
+        if (btn) btn.style.display = 'none';
+        showScreen('title-screen');
+      })
+      .finally(() => { rejoinInFlight = false; });
+  }
+
+  // Persistent banner while the connection is being repaired
+  function showConnectionBanner(text) {
+    let el = document.getElementById('connection-banner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'connection-banner';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    if (text) {
+      el.textContent = text;
+      el.classList.add('show');
+    } else {
+      el.classList.remove('show');
+    }
   }
 
   function startSoloGame() {
@@ -550,7 +603,9 @@ const UI = (() => {
       // Build card backs HTML for other players
       let cardBacksHtml = '';
       if (seat !== mySeat) {
-        const cardCount = state.hands[seat] ? state.hands[seat].length : 0;
+        // Other hands are private; the host shares only their sizes
+        const cardCount = (state.hands[seat] && state.hands[seat].length) ||
+          (Array.isArray(state.handCounts) ? state.handCounts[seat] || 0 : 0);
         if (cardCount > 0) {
           // Show up to 9 mini card backs fanned out
           const showCount = Math.min(cardCount, 9);
@@ -1180,7 +1235,7 @@ const UI = (() => {
     showRaisePrompt, showRoundResult, showGameOver,
     showEmojiReaction,
     animateTrickWin, addChatMessage, showToast,
-    showShuffleAnimation,
+    showShuffleAnimation, showConnectionBanner,
     updatePointsDisplay, renderBadgesGrid,
     triggerTrickWinFX,
   };

@@ -7,7 +7,9 @@
   },
   "scripts": {
     "test": "node tests/test-multiplayer.js",
-    "test:e2e": "node tests/test-e2e-webrtc.js"
+    "test:e2e": "node tests/test-e2e-webrtc.js && node tests/test-e2e-resilience.js",
+    "test:e2e:smoke": "node tests/test-e2e-webrtc.js",
+    "test:e2e:resilience": "node tests/test-e2e-resilience.js"
   },
   "keywords": [],
   "author": "",

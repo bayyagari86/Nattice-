@@ -38,7 +38,13 @@ const GameCrypto = (() => {
     const combined = new Uint8Array(12 + ciphertext.byteLength);
     combined.set(iv);
     combined.set(new Uint8Array(ciphertext), 12);
-    return btoa(String.fromCharCode(...combined));
+    // Chunked conversion: spreading a large array into fromCharCode overflows
+    // the call stack for big payloads (full state snapshots).
+    let bin = '';
+    for (let i = 0; i < combined.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, combined.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
   }
 
   // Decrypt an AES-256-GCM encrypted string
@@ -121,7 +127,23 @@ const GameCrypto = (() => {
     return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   }
 
+  // Random 256-bit secret (hex) — proves seat ownership on rejoin
+  function generateSecret() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // SHA-256 hex digest. Only the hash of a player's secret is ever shared,
+  // so any host (including one elected after migration) can verify a rejoin
+  // without the secret itself ever leaving the player's device.
+  async function sha256Hex(str) {
+    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(str));
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+  }
+
   return {
+    generateSecret, sha256Hex,
     generateKey, exportKey, importKey,
     encrypt, decrypt, deriveRoomKey,
     secureShuffleDeck, commitDeck, verifyCommitment,
