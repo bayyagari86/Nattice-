@@ -1851,6 +1851,7 @@ const Game = (() => {
 
   function playCard(cardId) {
     if (!state || state.phase !== 'PLAYING' || mySeat !== state.currentRound.currentPlayer) return;
+    if ((state.currentRound.currentTrick || []).length >= 6) return; // trick still being cleared
     if (isSoloMode || Network.getIsHost()) {
       processPlayCard(mySeat, cardId);
       return;
@@ -1879,6 +1880,14 @@ const Game = (() => {
 
   // Returns true if the play was accepted
   function processPlayCard(seat, cardId) {
+    // Single choke point for every play (local, remote, AI, turn timeout):
+    // it must be this seat's turn, and a finished trick that is still on the
+    // table (the pause before it clears) accepts no more cards. Without the
+    // second check the player who completed the trick could play again during
+    // the pause — the trick then grows past 6 and never resolves.
+    if (!state || state.phase !== 'PLAYING' || !state.currentRound) return false;
+    if (seat !== state.currentRound.currentPlayer) return false;
+    if (state.currentRound.currentTrick.length >= 6) return false;
     const hand = state.hands[seat];
     if (!hand) return false;
     const cardIdx = hand.findIndex(c => c.id === cardId);

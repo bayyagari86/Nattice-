@@ -165,7 +165,26 @@ See sections 4–6 above.
 | `npm test` | jsdom unit tests: lobby/UI, protocol invariants, `Engine.recoverHands` (random mid-round deals, voids, invalid or duplicate claims), seat-secret hashing, large-payload encryption |
 | `npm run test:e2e:smoke` | 2 tabs: join, start, host crash leads to promotion |
 | `npm run test:e2e:resilience` | 3 isolated browser contexts plus 3 bots with autoplayers. Covers: forged rejoin refused; host killed mid-trick (one new host, higher term, hands match the host's copy, round finishes); client refresh (same seat, same hand, no host change); host frozen 25s (other player takes over, woken host steps down, one host) |
-| `npm run test:e2e` | both E2E suites |
+| `npm run test:e2e:capacity` | `ROOMS` rooms (default 3) × 6 humans, each a separate browser context, all playing at once. Checks seats, one host per room, hands, room isolation, round completion, a host crash in a full room, and play latency |
+| `npm run test:e2e` | smoke + resilience |
+
+### Capacity results (2-core sandbox, loopback)
+
+| Rooms × humans | Checks | Seat all 6 | Play latency p50 / p95 | Host takeover (5 survivors) |
+|---|---|---|---|---|
+| 1 × 6 | 21/21 | 2.0s | 49ms / 103ms | 0.2s |
+| 2 × 6 (12 players) | 32/32 | 2.4–2.6s | 43–60ms / 120–183ms | 0.2s |
+| 3 × 6 (18 players) | 39/39 | 2.2–2.9s | 69–95ms / 360–936ms | 0.1s |
+
+All 18 players ran on one 2-core machine. Latency rises because of CPU
+contention on that machine, not the protocol. Each real player has their
+own device. Occasional outliers of 3–6s appeared only in the 18-player run.
+
+**Bug this caught:** during the 1.2s pause after a trick completes, the
+player who played the 6th card could play again. The trick then grew past
+6 and the round froze. It affected solo play too. Plays are now refused
+while a finished trick is on the table, and the hand shows no playable
+cards during that pause.
 
 **What these tests cannot prove.** Everything runs on one machine over
 loopback with a local PeerJS broker. They do not exercise:

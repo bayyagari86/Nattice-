@@ -690,7 +690,8 @@ const UI = (() => {
     const leadSuit = !isLeading
       ? (state.currentRound.currentTrick[0].card.suit === 'joker' ? null : state.currentRound.currentTrick[0].card.suit)
       : null;
-    const isMyTurn = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat;
+    const isMyTurn = state.phase === 'PLAYING' && state.currentRound.currentPlayer === mySeat &&
+      (state.currentRound.currentTrick || []).length < 6; // not while a finished trick is on the table
     const playable = isMyTurn
       ? Engine.getPlayableCards(hand, leadSuit, isLeading)
       : [];

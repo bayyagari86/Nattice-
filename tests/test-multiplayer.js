@@ -397,6 +397,25 @@ test('client peer-leave triggers attemptHostMigration when host drops', () => {
   assert(/away \|\| reconnecting/.test(src), 'must not migrate when WE were the ones away');
 });
 
+test('no card is accepted while a finished trick is still on the table', () => {
+  const src = read('game.js');
+  const m = src.match(/function processPlayCard[\s\S]*?^\s{2}\}/m);
+  assert(/seat !== state\.currentRound\.currentPlayer\) return false/.test(m[0]), 'processPlayCard must check the turn');
+  assert(/currentTrick\.length >= 6\) return false/.test(m[0]), 'processPlayCard must refuse a 7th card');
+});
+test('UI does not offer cards while a finished trick is on the table', () => {
+  const state = win.Engine.createGameState();
+  state.phase = 'PLAYING';
+  for (let s = 0; s < 6; s++) state.players[s] = { id: 'p' + s, name: 'P' + s, seat: s, connected: true };
+  const deck = win.Engine.createDeck();
+  state.hands = [0, 1, 2, 3, 4, 5].map(s => deck.slice(s * 9, s * 9 + 8));
+  state.currentRound = { currentPlayer: 0, currentBidder: 0, tricksPlayed: 1, tricksTaken: { A: 1, B: 0 }, bids: [], tricks: [],
+    currentTrick: [0, 1, 2, 3, 4, 5].map(s => ({ playerIndex: s, card: deck[s * 9 + 8] })), passedPlayers: new Set(), raiseCommitments: {} };
+  try { win.UI.updateAll(state, 0); } catch (_) {}
+  const playable = win.document.querySelectorAll('.card.playable');
+  assertEq(playable.length, 0, 'cards must not be playable during the trick pause');
+});
+
 console.log('\n== Network hardening ==');
 test('Network exposes sendByeBestEffort for graceful leave', () => {
   assert(typeof win.Network.sendByeBestEffort === 'function', 'sendByeBestEffort not exported');
