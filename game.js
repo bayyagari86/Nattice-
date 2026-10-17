@@ -2247,7 +2247,7 @@ const Game = (() => {
 
     let delay;
     if (state.phase === 'PLAYING') {
-      delay = 7000;
+      delay = 2000; // AI card play: 2 seconds
     } else if (state.phase === 'BIDDING' || state.phase === 'TRUMP_SELECT') {
       delay = isSoloMode ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
     } else {
