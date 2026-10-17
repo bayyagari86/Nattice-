@@ -528,8 +528,14 @@ const UI = (() => {
   function isCompactLandscape() {
     return window.innerWidth > window.innerHeight && window.innerHeight <= 520;
   }
+  // Short portrait screens (small phones with browser bars showing): same
+  // compact seats, arranged for a tall, narrow table.
+  function isCompactPortrait() {
+    return window.innerWidth <= window.innerHeight && window.innerHeight <= 700;
+  }
   function applyLayoutMode() {
     document.body.classList.toggle('compact-land', isCompactLandscape());
+    document.body.classList.toggle('compact-port', isCompactPortrait());
   }
   applyLayoutMode();
 
@@ -783,6 +789,16 @@ const UI = (() => {
         { x: 89, y: 60 },   // Bottom-right
       ];
     }
+    if (isCompactPortrait()) {
+      return [
+        { x: 50, y: 100 },  // Me — reaction row docked to the bottom edge (CSS)
+        { x: 14, y: 66 },   // Bottom-left
+        { x: 14, y: 28 },   // Top-left
+        { x: 50, y: 8 },    // Top
+        { x: 86, y: 28 },   // Top-right
+        { x: 86, y: 66 },   // Bottom-right
+      ];
+    }
     // 6 positions around table, index 0 = bottom center (me)
     return [
       { x: 50, y: 72 },   // Bottom (me)
@@ -979,24 +995,28 @@ const UI = (() => {
   function fitTrickPositions() {
     const table = document.querySelector('.game-table');
     const top = document.querySelector('#player-positions .table-player.seat-top');
-    const meAv = document.querySelector('#player-positions .table-player.me .player-avatar');
-    if (!table || !top || !meAv) return null;
+    // My avatar, or (compact layouts) the reaction row that replaces it
+    let meAv = document.querySelector('#player-positions .table-player.me .player-avatar');
+    if (meAv && !meAv.getBoundingClientRect().height) meAv = document.querySelector('#player-positions .table-player.me .reaction-bar');
+    if (!table || !top || !meAv || !meAv.getBoundingClientRect().height) return null;
     const T = table.getBoundingClientRect();
     if (T.height < 200) return null;
-    const half = (window.innerWidth <= 640 ? 68 : 70) / 2 + 8;   // half a trick card incl. its label
+    const half = document.body.classList.contains('compact-port') ? 29
+      : (window.innerWidth <= 640 ? 68 : 70) / 2 + 8;   // half a trick card incl. its label
     const lo = top.getBoundingClientRect().bottom - T.top + 4 + half;
-    const hi = meAv.getBoundingClientRect().top - T.top - 4 - half;
+    const hi = meAv.getBoundingClientRect().top - T.top - 8 - half;
     if (!(hi > lo)) return null;
     const topC = lo, meC = Math.max(lo + 2 * half, hi);
     const mid = (topC + meC) / 2, gap = Math.max(half + 2, (meC - topC) * 0.25);
     const pct = (px) => Math.max(0, Math.min(100, (px / T.height) * 100));
+    const L = T.width <= 340 ? 37 : 35, R = 100 - L;   // narrowest phones: pull side cards inward
     return [
       { x: 50, y: pct(meC) },        // Me (bottom)
-      { x: 35, y: pct(mid + gap) },  // Left
-      { x: 35, y: pct(mid - gap) },  // Top-left
+      { x: L, y: pct(mid + gap) },   // Left
+      { x: L, y: pct(mid - gap) },   // Top-left
       { x: 50, y: pct(topC) },       // Top
-      { x: 65, y: pct(mid - gap) },  // Top-right
-      { x: 65, y: pct(mid + gap) },  // Right
+      { x: R, y: pct(mid - gap) },   // Top-right
+      { x: R, y: pct(mid + gap) },   // Right
     ];
   }
 
@@ -1370,12 +1390,18 @@ const UI = (() => {
         </div>
         <div class="result-actions">
           <button class="wa-btn" id="share-game-btn">Share on WhatsApp</button>
+          <button class="reel-btn" id="reel-game-btn">Recap reel</button>
           <button onclick="location.reload()" class="result-dismiss">Play Again</button>
         </div>
       </div>
     `;
     const st = Game.getState && Game.getState();
     const last = st && st.roundHistory && st.roundHistory[st.roundHistory.length - 1];
+    // Recap of the deciding round
+    const reelG = document.getElementById('reel-game-btn');
+    let snapG = null;
+    try { snapG = (typeof Reel !== 'undefined' && last && last.tricksTaken && Reel.pickMime()) ? Reel.snapshot(last) : null; } catch (e) {}
+    if (!snapG) reelG.style.display = 'none'; else reelG.onclick = () => Reel.open(last, snapG);
     wireShare(document.getElementById('share-game-btn'), {
       won, title: won ? 'We won!' : 'Game over', headline: won ? 'We won!' : 'Game over', subtitle: `Team ${winner} wins the game`, myTeam,
       scores, delta: { A: 0, B: 0 },

@@ -31,12 +31,26 @@ const Sound = (() => {
     master.connect(ctx.destination);
     return ctx;
   }
-  // Browsers only allow sound after a user gesture
+  // iPhone: Web Audio is muted by the ring/silent switch unless the page asks
+  // for "playback" (iOS 16.4+). Older iOS: playing a media element once does the same.
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (_) {}
+  const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+  let mediaKicked = false;
+  // Browsers only allow sound after a user gesture (iOS: touchend / click)
   function unlock() {
     const c = ensureCtx();
-    if (c && c.state === 'suspended') c.resume().catch(() => {});
+    if (!c) return;
+    if (c.state !== 'running') c.resume().catch(() => {});
+    try { // a one-sample silent buffer fully unlocks older Safari
+      const b = c.createBuffer(1, 1, 22050), src = c.createBufferSource();
+      src.buffer = b; src.connect(c.destination); src.start(0);
+    } catch (_) {}
+    if (!mediaKicked) {
+      mediaKicked = true;
+      try { const a = new Audio(SILENT_WAV); a.setAttribute('playsinline', ''); a.play().catch(() => {}); } catch (_) {}
+    }
   }
-  ['pointerdown', 'touchstart', 'keydown'].forEach(ev => window.addEventListener(ev, unlock, { passive: true }));
+  ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, unlock, { passive: true, capture: true }));
 
   function canPlay() { const c = ensureCtx(); return !!(c && c.state === 'running'); }
 
@@ -55,8 +69,14 @@ const Sound = (() => {
     return buffers.get(url);
   }
 
+  async function waitRunning(ms = 600) {
+    const c = ensureCtx(); if (!c) return false;
+    if (c.state === 'running') return true;
+    try { await Promise.race([c.resume(), new Promise(r => setTimeout(r, ms))]); } catch (_) {}
+    return c.state === 'running';
+  }
   async function playUrl(url, { delay = 0, gain = 1 } = {}) {
-    if (!canPlay()) return 0;
+    if (!(await waitRunning())) return 0;
     const buf = await load(url);
     if (!buf) return 0;
     const src = ctx.createBufferSource();
