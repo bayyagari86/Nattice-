@@ -1269,10 +1269,13 @@ const Game = (() => {
         UI.addChatMessage(msg.name, msg.text);
         bcast({ type: 'CHAT', name: msg.name, text: msg.text }); // relay
         break;
-      case 'EMOJI_REACTION':
+      case 'EMOJI_REACTION': {
         if (!peerToSeat.has(fromPeer)) return;
-        UI.showEmojiReaction(msg.emoji);
-        bcast({ type: 'EMOJI_REACTION', emoji: msg.emoji }); // relay
+        const fromSeat = peerToSeat.get(fromPeer); // trust the host's mapping, not the message
+        UI.showEmojiReaction(msg.emoji, fromSeat);
+        bcast({ type: 'EMOJI_REACTION', emoji: msg.emoji, seat: fromSeat }); // relay
+        break;
+      }
         break;
     }
   }
@@ -1381,7 +1384,7 @@ const Game = (() => {
         UI.addChatMessage(msg.name, msg.text);
         break;
       case 'EMOJI_REACTION':
-        UI.showEmojiReaction(msg.emoji);
+        UI.showEmojiReaction(msg.emoji, Number.isInteger(msg.seat) ? msg.seat : undefined);
         break;
     }
   }
@@ -2850,10 +2853,10 @@ const Game = (() => {
   // Broadcast emoji reaction to all players
   function broadcastEmoji(emoji) {
     if (!isSoloMode) {
-      const msg = { type: 'EMOJI_REACTION', emoji };
+      const msg = { type: 'EMOJI_REACTION', emoji, seat: mySeat };
       bcast(msg);
     }
-    UI.showEmojiReaction(emoji);
+    UI.showEmojiReaction(emoji, mySeat);
   }
 
   // Sanitize state before sending: hide every hand, expose only counts

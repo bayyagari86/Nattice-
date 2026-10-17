@@ -31,7 +31,7 @@
   <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./style.css?v=15">
+  <link rel="stylesheet" href="./style.css?v=16">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -105,6 +105,7 @@
         <button id="join-btn" class="btn btn-secondary">Join a Game</button>
         <button id="rejoin-btn" class="btn btn-primary" style="display:none">Rejoin game</button>
         <button id="rules-btn" class="btn btn-ghost">View Rules</button>
+        <button id="title-theme-btn" class="btn btn-ghost">Themes &amp; Cards</button>
       </div>
     </div>
   </div>
@@ -132,6 +133,8 @@
       </div>
     </div>
 
+    <button id="wa-invite-btn" class="btn wa-btn" style="display:none">Invite on WhatsApp</button>
+
     <div id="lobby-seats"></div>
 
     <button id="start-game-btn" class="btn btn-primary">Start Game</button>
@@ -148,6 +151,7 @@
         <span class="badges-icon">🏆</span>
         <span class="badges-pts" id="topbar-points">0</span>
       </button>
+      <button id="theme-toggle" class="theme-toggle-btn" title="Table &amp; card themes" aria-label="Themes">🎨</button>
       <div class="scoreboard">
         <div class="score-team">
           <span id="my-team-label">Team A (You)</span>
@@ -168,8 +172,12 @@
       </div>
     </div>
 
+    <!-- Bid progress strip -->
+    <div id="bid-progress" aria-live="polite"></div>
+
     <!-- Table Area -->
     <div class="game-table">
+      <div id="theme-deco" aria-hidden="true"></div>
       <div class="table-center-circle"></div>
       <div id="player-positions"></div>
       <div id="current-trick"></div>
@@ -226,6 +234,17 @@
 
   <!-- Result Overlay -->
   <div id="result-overlay"></div>
+
+  <!-- Theme Overlay -->
+  <div id="theme-overlay">
+    <div class="theme-card">
+      <div class="theme-head"><h2>Themes</h2><button class="theme-close" id="theme-close" aria-label="Close">&times;</button></div>
+      <h3>Table</h3>
+      <div class="theme-grid" id="theme-table-options"></div>
+      <h3>Cards</h3>
+      <div class="theme-grid" id="theme-deck-options"></div>
+    </div>
+  </div>
 
   <!-- Rules Overlay -->
   <div id="rules-overlay">
@@ -314,10 +333,11 @@
   <script src="./crypto.js?v=14"></script>
   <script src="./engine.js?v=14"></script>
   <script src="./network.js?v=14"></script>
-  <script src="./ui.js?v=15"></script>
+  <script src="./ui.js?v=16"></script>
   <script src="./badges.js?v=14"></script>
   <script src="./fx.js?v=14"></script>
-  <script src="./game.js?v=15"></script>
+  <script src="./extras.js?v=16"></script>
+  <script src="./game.js?v=16"></script>
   <script>
     // Service Worker registration
     if ('serviceWorker' in navigator) {

@@ -53,6 +53,7 @@ const UI = (() => {
   }
 
   function init() {
+    if (typeof Extras !== 'undefined') Extras.init();
     // Track console errors for automation
     if (!window.consoleErrors) {
       window.consoleErrors = [];
@@ -260,6 +261,11 @@ const UI = (() => {
             }
           }
           qrContainer.style.display = 'flex';
+          const wa = document.getElementById('wa-invite-btn');
+          if (wa && typeof Extras !== 'undefined') {
+            wa.style.display = 'block';
+            wa.onclick = () => Extras.inviteOnWhatsApp(joinUrl, roomCode);
+          }
         }
       }).catch(err => {
         showToast('Failed to create room: ' + err.message);
@@ -573,7 +579,43 @@ const UI = (() => {
     renderBiddingUI(state, mySeat);
     renderTrumpSelectUI(state, mySeat);
     renderRaiseUI(state, mySeat);
+    renderBidProgress(state, mySeat);
+    if (state.phase === 'BIDDING' && typeof Extras !== 'undefined') Extras.greetIfFestival();
     syncHandHeight();
+  }
+
+  // Bid progress: bidding team's tricks fill from the left, defenders' from
+  // the right; the gold notch marks the bid. Shows "made" / "broken" states.
+  function renderBidProgress(state, mySeat) {
+    const el = document.getElementById('bid-progress');
+    if (!el) return;
+    const r = state.currentRound;
+    const show = r && r.bid > 0 && r.biddingTeam && ['PLAYING', 'RAISE_CHECK', 'ROUND_END'].includes(state.phase);
+    if (!show) { el.classList.remove('show'); el.innerHTML = ''; return; }
+    const bt = r.biddingTeam, dt = bt === 'A' ? 'B' : 'A';
+    const mine = bt === Engine.getTeam(mySeat);
+    const got = (r.tricksTaken && r.tricksTaken[bt]) || 0;
+    const def = (r.tricksTaken && r.tricksTaken[dt]) || 0;
+    const need = Math.max(0, r.bid - got);
+    const breakAt = 9 - r.bid + 1;            // defender tricks that break the bid
+    const made = got >= r.bid, broken = def >= breakAt;
+    let segs = '';
+    for (let i = 0; i < 9; i++) {
+      let cls = 'seg';
+      if (i < got) cls += ` fill team-${bt.toLowerCase()}`;
+      else if (i >= 9 - def) cls += ` fill team-${dt.toLowerCase()}`;
+      if (i === r.bid - 1) cls += ' bid-mark';
+      if (!made && !broken && i === got && need === 1) cls += ' next';
+      segs += `<span class="${cls}"></span>`;
+    }
+    const label = made ? `Bid made! ${got}/${r.bid}`
+      : broken ? `Bid broken — ${dt === Engine.getTeam(mySeat) ? 'your team' : 'Team ' + dt} stopped it`
+      : `${mine ? 'Your team' : 'Team ' + bt} needs ${need} more · ${got}/${r.bid}`;
+    el.className = `show ${made ? 'made' : ''} ${broken ? 'broken' : ''} ${need === 1 && !broken ? 'danger' : ''}`;
+    el.innerHTML = `<span class="bp-team team-name-${bt.toLowerCase()}">${bt}</span>
+      <span class="bp-track">${segs}</span>
+      <span class="bp-team team-name-${dt.toLowerCase()}">${dt}</span>
+      <span class="bp-label">${label}</span>`;
   }
 
   function renderScoreboard(state, mySeat) {
@@ -686,8 +728,8 @@ const UI = (() => {
       el.innerHTML = `
         <div class="reaction-float" id="reaction-float-${seat}"></div>
         <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
-        <div class="player-name">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
-        <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}</div>
+        <div class="player-name team-name-${team.toLowerCase()}">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
+        <div class="player-meta">${seat !== mySeat && team === Engine.getTeam(mySeat) ? '<span class="partner-tag">Partner</span>' : `Team ${team}`}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}</div>
         ${reactionBarHtml}
         ${cardBacksHtml}
       `;
@@ -866,7 +908,7 @@ const UI = (() => {
           <span class="card-rank">${displayRank}</span>
           <span class="card-suit">${symbol}</span>
         </div>
-        <div class="trick-card-label">${playerLabel}</div>
+        <div class="trick-card-label team-name-${Engine.getTeam(playerIndex).toLowerCase()}">${playerLabel}</div>
       `;
       trickEl.appendChild(el);
     });
@@ -1017,13 +1059,26 @@ const UI = (() => {
     // Build bid history display
     let bidHistoryHtml = '';
     if (state.currentRound.bids && state.currentRound.bids.length > 0) {
+      const myTeam = Engine.getTeam(mySeat);
       bidHistoryHtml = '<div class="bid-history">';
       for (const b of state.currentRound.bids) {
-        const playerName = state.players[b.seat]?.name || `Player ${b.seat + 1}`;
+        const playerName = b.seat === mySeat ? 'You' : (state.players[b.seat]?.name || `Player ${b.seat + 1}`);
+        const team = Engine.getTeam(b.seat);
+        const mate = b.seat !== mySeat && team === myTeam ? ' <span class="partner-tag">Partner</span>' : '';
         const bidText = b.bid === 0 ? 'Pass' : b.bid;
-        bidHistoryHtml += `<div class="bid-history-item"><span class="bid-player">${playerName}:</span> <span class="bid-value">${bidText}</span></div>`;
+        bidHistoryHtml += `<div class="bid-history-item ${team === myTeam ? 'my-team' : 'opp-team'}"><span class="bid-player team-name-${team.toLowerCase()}">${escapeHtml(playerName)}${mate}:</span> <span class="bid-value">${bidText}</span></div>`;
       }
       bidHistoryHtml += '</div>';
+    }
+    {
+      const myTeam = Engine.getTeam(mySeat);
+      const oppTeam = myTeam === 'A' ? 'B' : 'A';
+      const names = (t) => [0, 1, 2, 3, 4, 5].filter(i => Engine.getTeam(i) === t)
+        .map(i => i === mySeat ? 'You' : escapeHtml(state.players[i]?.name || `P${i + 1}`)).join(', ');
+      bidHistoryHtml = `<div class="bid-teams">
+          <div class="bid-team-row team-name-${myTeam.toLowerCase()}"><span class="dot"></span>Your team: ${names(myTeam)}</div>
+          <div class="bid-team-row team-name-${oppTeam.toLowerCase()}"><span class="dot"></span>Opponents: ${names(oppTeam)}</div>
+        </div>` + bidHistoryHtml;
     }
     
     panel.innerHTML = `<div class="bid-title">Your Bid</div>${bidHistoryHtml}<div class="bid-buttons"></div>`;
@@ -1204,9 +1259,25 @@ const UI = (() => {
             <div>Team B: ${result.totalScores.B} pts ${result.scoreChange.B > 0 ? `(+${result.scoreChange.B})` : ''}</div>
           </div>
         </div>
-        <button onclick="document.getElementById('result-overlay').style.display='none'" class="result-dismiss">Continue</button>
+        <div class="result-actions">
+          <button class="wa-btn" id="share-round-btn">Share on WhatsApp</button>
+          <button onclick="document.getElementById('result-overlay').style.display='none'" class="result-dismiss">Continue</button>
+        </div>
       </div>
     `;
+    wireShare(document.getElementById('share-round-btn'), {
+      won, title, subtitle: `Team ${result.biddingTeam} bid ${result.bid}`, myTeam,
+      scores: result.totalScores, delta: result.scoreChange, tricks: result.tricksTaken,
+      bid: result.bid, biddingTeam: result.biddingTeam,
+    });
+  }
+
+  function wireShare(btn, card) {
+    if (!btn || typeof Extras === 'undefined') { if (btn) btn.style.display = 'none'; return; }
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; const t = btn.textContent; btn.textContent = 'Preparing…';
+      try { await Extras.shareScorecard(card); } finally { btn.disabled = false; btn.textContent = t; }
+    });
   }
 
   function showGameOver(winner, scores) {
@@ -1222,9 +1293,19 @@ const UI = (() => {
           <div class="final-score">Team A: ${scores.A} \u2014 Team B: ${scores.B}</div>
           <div>Team ${winner} wins the game!</div>
         </div>
-        <button onclick="location.reload()" class="result-dismiss">Play Again</button>
+        <div class="result-actions">
+          <button class="wa-btn" id="share-game-btn">Share on WhatsApp</button>
+          <button onclick="location.reload()" class="result-dismiss">Play Again</button>
+        </div>
       </div>
     `;
+    const st = Game.getState && Game.getState();
+    const last = st && st.roundHistory && st.roundHistory[st.roundHistory.length - 1];
+    wireShare(document.getElementById('share-game-btn'), {
+      won, title: won ? 'We won!' : 'Game over', headline: won ? 'We won!' : 'Game over', subtitle: `Team ${winner} wins the game`, myTeam,
+      scores, delta: { A: 0, B: 0 },
+      tricks: last ? last.tricksTaken : { A: 0, B: 0 }, bid: last ? last.bid : 5, biddingTeam: last ? last.biddingTeam : winner,
+    });
   }
 
   function animateTrickWin(winner, trickCards) {
@@ -1233,7 +1314,13 @@ const UI = (() => {
   }
 
   // === EMOJI REACTIONS ===
-  function showEmojiReaction(emoji) {
+  function showEmojiReaction(emoji, seat) {
+    if (typeof Extras !== 'undefined') {
+      const st = Game.getState && Game.getState();
+      const p = st && st.players && seat != null ? st.players[seat] : null;
+      Extras.showReaction(emoji, p ? { name: seat === Game.getMySeat() ? 'You' : p.name, team: Engine.getTeam(seat) } : {});
+      return;
+    }
     const centerEl = document.getElementById('center-emoji');
     if (!centerEl) return;
     centerEl.textContent = emoji;
@@ -1244,10 +1331,8 @@ const UI = (() => {
   }
 
   function broadcastEmojiReaction(emoji) {
-    showEmojiReaction(emoji);
-    if (Game && Game.broadcastEmoji) {
-      Game.broadcastEmoji(emoji);
-    }
+    if (Game && Game.broadcastEmoji) Game.broadcastEmoji(emoji); // shows locally too
+    else showEmojiReaction(emoji, Game.getMySeat());
   }
 
   // === CHAT ===
