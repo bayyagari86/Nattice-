@@ -65,9 +65,11 @@ scratch HTML files so builds stay tiny.
   Once connected, all game traffic goes browser-to-browser directly.
 - **Load:** trivial. Each player sends ~3 small messages during handshake
   and then nothing else. Even 6-player rooms don't move the needle.
-- **Failure mode:** occasional 5xx bursts. Our client (`network.js`)
-  retries up to 3× with 1.5s + 3s backoff before surfacing the error to
-  the player.
+- **Failure mode:** occasional 5xx bursts or dropped websockets. The
+  first connect retries 3× with backoff. After that, the client reconnects
+  to the broker forever (backoff capped at 30s). Existing peer-to-peer
+  channels keep working while signaling is down; only new joins and
+  rejoins wait.
 - **Upgrade path:** if PeerJS cloud becomes unreliable at scale, host your
   own broker on Render / Fly.io and set `window.NATTICE_CONFIG.peerHost`.
   See "Own broker" below.
@@ -137,6 +139,21 @@ If step 4 fails, check the browser console:
 - If you see `iceConnectionState: failed` — TURN isn't reaching. Verify
   the OpenRelay URLs in `index.html` are reachable
   (`curl -v turn:openrelay.metered.ca:443` should not hang).
+
+### Real-network check (do this once per release)
+
+The automated tests run on loopback, so run one manual session across real
+networks:
+
+1. Three phones: one on Wi-Fi, two on cellular (different carriers if
+   possible). Create a room and join.
+2. Mid-trick, put the host phone in airplane mode. Within ~15s another
+   player should take over and play should continue. Turn airplane mode
+   off. The old host should rejoin as a player, not as a second host.
+3. Refresh a client mid-round. It should rejoin the same seat with the same
+   cards.
+4. Background the host app for about 30s, then return. You should end up
+   with exactly one host.
 
 ## Costs at scale
 

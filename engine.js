@@ -341,8 +341,81 @@ const Engine = (() => {
     };
   }
 
+  // Recover a consistent deal mid-round (used after host migration).
+  //   round:  currentRound (tricks[].cards, currentTrick) — the public record
+  //   known:  { seat: [cards] } hands reported by their owners
+  // Everything not played and not claimed is the unseen pool; it is dealt to
+  // the seats that still need cards, honouring observed voids (a seat that
+  // failed to follow a non-joker lead holds none of that suit; jokers are
+  // exempt from follow-suit so they reveal nothing).
+  // Invalid reports (duplicates, played cards, too many cards) are ignored.
+  // Returns { ok, hands, knownSeats } — ok=false if no consistent deal exists.
+  function recoverHands(round, known, rng = Math.random) {
+    const deck = createDeck();
+    const byId = new Map(deck.map(c => [c.id, c]));
+    const played = new Set();
+    const playedCount = [0, 0, 0, 0, 0, 0];
+    const voids = [0, 1, 2, 3, 4, 5].map(() => new Set());
+    const tricks = ((round && round.tricks) || []).map(t => t.cards).concat([(round && round.currentTrick) || []]);
+    for (const cards of tricks) {
+      if (!cards || !cards.length) continue;
+      if (played.has(cards[0].card.id)) continue; // finished trick not yet cleared
+      const lead = cards[0].card.suit;
+      cards.forEach(({ playerIndex, card }, i) => {
+        if (!byId.has(card.id) || played.has(card.id)) return;
+        played.add(card.id);
+        playedCount[playerIndex]++;
+        if (i > 0 && lead !== 'joker' && card.suit !== 'joker' && card.suit !== lead) voids[playerIndex].add(lead);
+      });
+    }
+    const expected = playedCount.map(n => 9 - n);
+    const claimed = new Set();
+    const hands = [[], [], [], [], [], []];
+    const knownSeats = [];
+    for (const [seatStr, arr] of Object.entries(known || {})) {
+      const seat = Number(seatStr);
+      if (!(seat >= 0 && seat < 6) || !Array.isArray(arr) || arr.length > expected[seat]) continue;
+      const ids = arr.map(c => c && c.id);
+      if (new Set(ids).size !== ids.length) continue;
+      if (ids.some(id => !byId.has(id) || played.has(id) || claimed.has(id))) continue;
+      ids.forEach(id => { claimed.add(id); hands[seat].push(byId.get(id)); });
+      knownSeats.push(seat);
+    }
+    const pool = deck.filter(c => !played.has(c.id) && !claimed.has(c.id));
+    const need = expected.map((n, s) => n - hands[s].length);
+    if (need.some(n => n < 0) || need.reduce((a, b) => a + b, 0) !== pool.length) {
+      return { ok: false, hands: null, knownSeats };
+    }
+    const deal = (respectVoids) => {
+      const out = hands.map(h => h.slice());
+      const left = need.slice();
+      const cards = pool.slice();
+      for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+      }
+      // Most-constrained cards first improves the hit rate of the greedy deal
+      const eligible = (c, s) => left[s] > 0 && (!respectVoids || c.suit === 'joker' || !voids[s].has(c.suit));
+      cards.sort((a, b) => [0, 1, 2, 3, 4, 5].filter(s => need[s] > 0 && (a.suit === 'joker' || !voids[s].has(a.suit))).length -
+        [0, 1, 2, 3, 4, 5].filter(s => need[s] > 0 && (b.suit === 'joker' || !voids[s].has(b.suit))).length);
+      for (const c of cards) {
+        const options = [0, 1, 2, 3, 4, 5].filter(s => eligible(c, s));
+        if (!options.length) return null;
+        const s = options[Math.floor(rng() * options.length)];
+        out[s].push(c);
+        left[s]--;
+      }
+      return out;
+    };
+    let result = null;
+    for (let i = 0; i < 300 && !result; i++) result = deal(true);
+    if (!result) result = deal(false);
+    if (!result) return { ok: false, hands: null, knownSeats };
+    return { ok: true, hands: result, knownSeats };
+  }
+
   return {
-    SUITS, RANKS, RANK_VALUES,
+    SUITS, RANKS, RANK_VALUES, recoverHands,
     createDeck, dealCards,
     getTeam, getTeamPlayers,
     sortHand, canFollowSuit, getPlayableCards,

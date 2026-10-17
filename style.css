@@ -1305,6 +1305,19 @@ html, body {
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* Connection repair banner */
+#connection-banner {
+  position: fixed; top: 0; left: 0; right: 0;
+  padding: 8px 16px; text-align: center;
+  background: #8a5a00; color: #fff;
+  font-size: 13px; font-weight: 600;
+  z-index: 250;
+  transform: translateY(-100%);
+  transition: transform 0.25s ease;
+  pointer-events: none;
+}
+#connection-banner.show { transform: translateY(0); }
+
 /* Footer */
 .footer-attr { position: fixed; bottom: 4px; right: 8px; font-size: 9px; color: var(--text-faint); z-index: 5; }
 .footer-attr a { color: var(--text-faint); text-decoration: none; }

@@ -1,5 +1,5 @@
 // Service Worker for Trump Call PWA
-const CACHE_NAME = 'trump-call-v28';
+const CACHE_NAME = 'trump-call-v29';
 const ASSETS = [
   './',
   './index.html',
@@ -49,15 +49,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for app shell
+  // Network-first for the app shell: in a multiplayer game every player
+  // must run the same protocol version, so fresh code wins whenever the
+  // network is up. The cache is the offline fallback.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetched = fetch(event.request).then((response) => {
+    fetch(event.request).then((response) => {
+      if (response && response.ok && event.request.method === 'GET') {
         const clone = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        return response;
-      });
-      return cached || fetched;
-    })
+      }
+      return response;
+    }).catch(() => caches.match(event.request))
   );
 });
