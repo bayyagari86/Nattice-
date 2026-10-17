@@ -2260,3 +2260,4 @@ body.compact-port .trick-card-label { font-size: 7px; margin-top: 1px; }
 body.compact-port .table-center-circle { display: none; }
 body.compact-port .table-player:not(.me) { white-space: nowrap; }
 body.compact-port .table-player .player-name { max-width: 74px; overflow: hidden; text-overflow: ellipsis; }
+body.compact-port .diya.d-bl, body.compact-port .diya.d-br { display: none; }
