@@ -303,13 +303,14 @@ const Engine = (() => {
   }
 
   // Check if game is over (62 points)
+  const TARGET_SCORE = 62;
   function isGameOver(scores) {
-    return scores.A >= 62 || scores.B >= 62;
+    return scores.A >= TARGET_SCORE || scores.B >= TARGET_SCORE;
   }
 
   function getWinner(scores) {
-    if (scores.A >= 62) return 'A';
-    if (scores.B >= 62) return 'B';
+    if (scores.A >= TARGET_SCORE) return 'A';
+    if (scores.B >= TARGET_SCORE) return 'B';
     return null;
   }
 
@@ -421,7 +422,7 @@ const Engine = (() => {
     sortHand, canFollowSuit, getPlayableCards,
     determineTrickWinnerRefined,
     isValidBid, calculateScore,
-    isGameOver, getWinner,
+    isGameOver, getWinner, TARGET_SCORE,
     createGameState,
   };
 })();

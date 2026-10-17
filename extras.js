@@ -237,7 +237,7 @@ const Extras = (() => {
   // ---------- Bot speed & names (per device; host's settings drive online bots) ----------
   const LS_SPEED = 'nattis.botSpeed', LS_NAMES = 'nattis.botNames', LS_FRIENDS = 'nattis.friendNames';
   const SPEEDS = {
-    fast:    { label: 'Fast',    sub: '1 sec',   ms: 1000 },
+    fast:    { label: 'Fast',    sub: '1 sec · default', ms: 1000 },
     normal:  { label: 'Normal',  sub: '2 sec',   ms: 2000 },
     relaxed: { label: 'Relaxed', sub: '3.5 sec', ms: 3500 },
     slow:    { label: 'Slow',    sub: '5 sec',   ms: 5000 },
@@ -252,7 +252,9 @@ const Extras = (() => {
     'Maggi', 'Senior', 'Fresher', 'Warden', 'Bablu', 'Litu', 'Munna', 'Guddu', 'Night Owl'];
   const lsGet = (k, dflt) => { try { const v = localStorage.getItem(k); return v == null ? dflt : v; } catch (_) { return dflt; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
-  function getSpeedPref() { const v = lsGet(LS_SPEED, 'normal'); return SPEEDS[v] ? v : 'normal'; }
+  // Tester trial (Oct 2026): 1-second bot play is the default; a saved choice is kept
+  const DEFAULT_SPEED = 'fast';
+  function getSpeedPref() { const v = lsGet(LS_SPEED, DEFAULT_SPEED); return SPEEDS[v] ? v : DEFAULT_SPEED; }
   function getBotDelayMs() { return SPEEDS[getSpeedPref()].ms; }
   function getNameMode() { const v = lsGet(LS_NAMES, 'hostel'); return NAME_MODES[v] ? v : 'hostel'; }
   function getFriendNames() {

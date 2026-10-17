@@ -213,7 +213,7 @@ const Game = (() => {
   const d = (ms) => Math.max(20, Math.round(ms * SPEED));
   function botPlayMs() {
     try { if (typeof Extras !== 'undefined' && Extras.getBotDelayMs) return Extras.getBotDelayMs(); } catch (_) {}
-    return 2000;
+    return 1000;
   }
   // Slower bot speeds also give a little longer to look at a finished trick
   const trickPauseMs = () => Math.round(1200 * Math.max(0.75, Math.min(1.7, botPlayMs() / 2000)));
@@ -2291,7 +2291,7 @@ const Game = (() => {
 
     let delay;
     if (state.phase === 'PLAYING') {
-      delay = botPlayMs(); // AI card play: player's chosen speed (default 2 seconds)
+      delay = botPlayMs(); // AI card play: player's chosen speed (default 1 second, tester trial)
     } else if (state.phase === 'BIDDING' || state.phase === 'TRUMP_SELECT') {
       delay = isSoloMode ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
     } else {
@@ -2343,73 +2343,175 @@ const Game = (() => {
     return { strength, bestSuit, suitCounts, suitStrength };
   }
 
-  function aiMakeBid(seat) {
-    const hand = state.hands[seat];
-    const eval_ = aiEvalHand(hand);
+  // --- BIDDING: count likely winners, not cards ---
+  // Strategy card #1: estimate tricks only from cards with a realistic chance
+  // to win; low cards count zero unless trump length or a void gives them one.
+  // Nobody can see where the Big Joker is, so a trump Ace is never treated as
+  // certain unless this hand holds the Big Joker itself.
+  const AI_SUITS = ['spades', 'hearts', 'diamonds', 'clubs'];
+  const AI_PARTNER_TRICKS = 2.2; // calibrated in all-bot games: what two partners add, on the cautious side
 
-    // Determine if we're in raise phase (after 5 tricks, only winning team can raise)
-    const isRaisePhase = state.phase === 'RAISE_CHECK';
-    const tricksPlayed = state.currentRound.tricksPlayed || 0;
-    const biddingTeam = state.currentRound.biddingTeam;
-    const myTeam = Engine.getTeam(seat);
-    const isWinningTeam = state.currentRound.tricksTaken[biddingTeam] >= tricksPlayed;
-
-    let bid;
-    if (isRaisePhase) {
-      // Raise phase only after 5 tricks, only winning team can raise
-      if (tricksPlayed >= 5 && isWinningTeam && myTeam === biddingTeam && eval_.strength >= 6) {
-        bid = Math.min(9, state.currentRound.bid + 1);
-      } else {
-        bid = 0; // Pass
-      }
-    } else {
-      // Initial bidding: 5-7 normally, 8-9 only for very strong hands
-      const currentBid = state.currentRound.bid;
-      const hasLongSuit = Object.values(eval_.suitCounts).some(c => c >= 5);
-      const hasHighCards = eval_.strength >= 7;
-      const hasJokers = hand.some(c => c.id === 'BIG_JOKER' || c.id === 'SMALL_JOKER');
-
-      // First bid: 5-7 normally
-      if (currentBid === 0) {
-        if (eval_.strength >= 5 && hasLongSuit && hasJokers) {
-          bid = 7; // Strong hand, bid 7
-        } else if (eval_.strength >= 4) {
-          bid = 5 + Math.floor(Math.random() * 2); // 5 or 6
-        } else if (eval_.strength >= 3) {
-          bid = 5;
-        } else {
-          bid = 0; // Pass
-        }
-      } else {
-        // Raising during initial phase: only to 8-9 if very strong
-        if (currentBid < 7 && eval_.strength >= 5) {
-          bid = currentBid + 1;
-        } else if (currentBid >= 7 && currentBid < 9 && hasLongSuit && hasHighCards && hasJokers) {
-          bid = currentBid + 1; // Only 8-9 for very strong hands
-        } else {
-          bid = 0; // Pass
-        }
-      }
+  function aiEstimateTricks(hand, trump) {
+    const big = hand.some(c => c.id === 'BIG_JOKER');
+    const small = hand.some(c => c.id === 'SMALL_JOKER');
+    const nt = trump === 'notrump';
+    let t = (big ? 1 : 0) + (small ? (nt ? 0.85 : 0.55) : 0);
+    const ranks = {};
+    for (const s of AI_SUITS) ranks[s] = new Set(hand.filter(c => c.suit === s).map(c => c.rank));
+    const len = s => ranks[s].size;
+    let ctrl = { n: 0, A: false, K: false, Q: false, big, small };
+    if (!nt) {
+      const r = ranks[trump], n = r.size, A = r.has('A'), K = r.has('K'), Q = r.has('Q');
+      ctrl = { n, A, K, Q, big, small };
+      if (A) t += big ? 1 : 0.8;
+      if (K) t += A ? 0.85 : (n >= 3 ? 0.55 : 0.35);
+      if (Q) t += (A && K) ? 0.65 : ((A || K) && n >= 3) ? 0.4 : (n >= 4 ? 0.25 : 0.1);
+      const honours = (A ? 1 : 0) + (K ? 1 : 0) + (Q ? 1 : 0);
+      const low = n - honours;
+      // Length: trumps beyond the third usually take a trick once trumps are drawn
+      t += Math.max(0, n - 3) * 0.45;
+      // Ruffing: short side suits let otherwise-losing low trumps win
+      let shortness = 0;
+      for (const s of AI_SUITS) if (s !== trump) shortness += len(s) === 0 ? 1 : len(s) === 1 ? 0.5 : 0;
+      t += Math.min(Math.max(0, low - Math.max(0, n - 3)), shortness) * 0.5;
     }
+    for (const s of AI_SUITS) {
+      if (s === trump) continue;
+      const r = ranks[s];
+      if (r.has('A')) t += nt ? 0.9 : 0.7;
+      if (r.has('K')) t += r.has('A') ? (nt ? 0.6 : 0.45) : (r.size >= 2 ? 0.3 : 0.1);
+      if (r.has('Q') && r.has('A') && r.has('K')) t += 0.2;
+    }
+    return { est: t, ctrl };
+  }
 
-    if (bid > 9) bid = 0; // Can't bid higher than 9
+  function aiBidPlan(hand) {
+    let best = null;
+    for (const trump of [...AI_SUITS, 'notrump']) {
+      const e = aiEstimateTricks(hand, trump);
+      if (!best || e.est > best.est + (trump === 'notrump' ? 0.25 : 0)) best = { trump, ...e };
+    }
+    const { est, ctrl, trump } = best;
+    let max = Math.floor(est + AI_PARTNER_TRICKS + 1e-9);
+    const nt = trump === 'notrump';
+    // Strong trump control is required for 6+ (card #1, and the Big Joker caveat)
+    const ok6 = est >= 3.6 && (nt ? ctrl.big : (ctrl.n >= 3 && (ctrl.A || ctrl.big)));
+    const ok7 = est >= 4.6 && (nt ? (ctrl.big && ctrl.small) : (ctrl.n >= 4 && (ctrl.big + ctrl.A + ctrl.K) >= 2));
+    const ok8 = est >= 5.8 && (nt ? false : (ctrl.n >= 5 && ctrl.big && ctrl.A));
+    if (max >= 8 && !ok8) max = 7;
+    if (max >= 7 && !ok7) max = 6;
+    if (max >= 6 && !ok6) max = 5;
+    return { max: Math.min(9, max), est, trump, ctrl };
+  }
+
+  function aiMakeBid(seat) {
+    const r = state.currentRound;
+    const plan = aiBidPlan(state.hands[seat]);
+    const myTeam = Engine.getTeam(seat);
+    const oppTeam = myTeam === 'A' ? 'B' : 'A';
+    const target = Engine.TARGET_SCORE || 62;
+    const current = r.bid || 0;
+    const holderIsPartner = current > 0 && r.bidder >= 0 && Engine.getTeam(r.bidder) === myTeam;
+    let bid = 0;
+    if (current === 0) {
+      if (plan.max >= 5) bid = plan.max;
+    } else if (holderIsPartner) {
+      // Don't stack on a partner's bid: their bid already counts on us.
+      // Take over only when this hand alone nearly covers the next level.
+      if (plan.max >= current + 1 && plan.est >= current) bid = current + 1;
+    } else if (current + 1 <= plan.max) {
+      bid = current + 1;
+    } else if ((state.scores[oppTeam] || 0) >= target - 12 &&
+               current + 1 <= 9 && plan.est >= 3.5 && plan.est + AI_PARTNER_TRICKS >= current + 0.4) {
+      // Score adjustment: opponents are close to winning the game, so one level
+      // of extra risk is worth it when our hand gives a real chance to make it.
+      bid = current + 1;
+    }
+    if (bid > 9 || (bid > 0 && bid <= current)) bid = 0;
     processBid(seat, bid);
   }
 
   function aiSelectTrump(seat) {
-    const hand = state.hands[seat];
-    const eval_ = aiEvalHand(hand);
+    processTrumpSelect(aiBidPlan(state.hands[seat]).trump || 'spades');
+  }
 
-    // AI sometimes chooses no-trump if hand is balanced (no long suit)
-    const suitCounts = Object.values(eval_.suitCounts);
-    const maxSuitCount = Math.max(...suitCounts);
-    const isBalanced = maxSuitCount <= 3; // No suit longer than 3 cards
-
-    if (isBalanced && Math.random() < 0.3) {
-      processTrumpSelect('notrump');
-    } else {
-      processTrumpSelect(eval_.bestSuit || 'spades');
+  // --- What a bot may legitimately know: its own hand, every card played so
+  // far this deal, and which players have shown a void. It never looks at
+  // another player's hand.
+  function aiSeen() {
+    const played = new Set();
+    for (const t of (state.currentRound.tricks || [])) for (const cp of (t.cards || t)) played.add(cp.card?.id || cp.id);
+    for (const cp of (state.currentRound.currentTrick || [])) played.add(cp.card.id);
+    return played;
+  }
+  function aiIsVoid(seat, suit) {
+    if (aiMemory.suitVoids[seat] && aiMemory.suitVoids[seat].has(suit)) return true;
+    // Also count a void shown earlier in the trick being played now
+    const trick = state.currentRound.currentTrick || [];
+    if (!trick.length) return false;
+    const ls = trick[0].card.suit;
+    return ls === suit && trick.some(cp => cp.playerIndex === seat && cp.card.suit !== ls && cp.card.suit !== 'joker');
+  }
+  // Trumps higher than `rank` that are neither played nor in this hand
+  function aiHigherTrumpsOut(trump, rank, hand, played) {
+    let n = 0;
+    for (const rk of Engine.RANKS) {
+      if (Engine.RANK_VALUES[rk] <= Engine.RANK_VALUES[rank]) continue;
+      const id = `${rk}_${trump}`;
+      if (!played.has(id) && !hand.some(c => c.id === id)) n++;
     }
+    return n;
+  }
+  function aiUnseenInSuit(suit, hand, played) {
+    let n = 0;
+    for (const rk of Engine.RANKS) { const id = `${rk}_${suit}`; if (!played.has(id) && !hand.some(c => c.id === id)) n++; }
+    return n;
+  }
+
+  // Strategy card #4: before trumping, check whether an opponent still to play
+  // has shown a void in this suit (or the suit is nearly gone) and could
+  // overtrump. Use the cheapest trump nobody can beat; if none is safe, spend
+  // the strongest one only when the trick matters, otherwise keep the trump.
+  function aiPickRuff(seat, hand, trumpWins, playable, trump, leadSuit, oppAfter, important) {
+    const played = aiSeen();
+    const unseenLead = aiUnseenInSuit(leadSuit, hand, played);
+    const threats = oppAfter.filter(s => !aiIsVoid(s, trump) &&
+      (aiIsVoid(s, leadSuit) || unseenLead < oppAfter.length));
+    const asc = [...trumpWins].sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank]);
+    if (!threats.length) return { card: asc[0], reason: 'no-threat' };
+    // The Big Joker beats every trump alike, so it doesn't change which trump to pick
+    const safe = asc.find(c => aiHigherTrumpsOut(trump, c.rank, hand, played) === 0);
+    if (safe) return { card: safe, reason: 'safe-high' };
+    if (important) return { card: asc[asc.length - 1], reason: 'best-chance' };
+    return { card: getDumpCard(playable, trump, leadSuit), reason: 'keep-trump' };
+  }
+
+  // Strategy card #2: the bidding team draws the opponents' trumps early.
+  function aiTrumpDrawLead(seat, hand, playable, trump, myTeam) {
+    const r = state.currentRound;
+    if (!trump || trump === 'notrump' || r.biddingTeam !== myTeam || (r.bid || 0) < 6) return null;
+    const played = aiSeen();
+    const myT = playable.filter(c => c.suit === trump).sort((a, b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank]);
+    if (myT.length < 2) return null;
+    const trumpsPlayed = Engine.RANKS.filter(rk => played.has(`${rk}_${trump}`)).length;
+    const outstanding = 13 - trumpsPlayed - myT.length;
+    if (outstanding <= 0) return null;
+    const opps = [0, 1, 2, 3, 4, 5].filter(s => Engine.getTeam(s) !== myTeam);
+    if (opps.every(s => aiIsVoid(s, trump))) return null; // opponents are out of trumps
+    const isMaster = c => aiHigherTrumpsOut(trump, c.rank, hand, played) === 0;
+    const topTwo = myT.length >= 2 && isMaster(myT[0]) && aiHigherTrumpsOut(trump, myT[1].rank, hand, played) === 0;
+    const strong = (myT.length >= 3 && isMaster(myT[0])) || topTwo;
+    if (!strong) return null;
+    const bigJokerOut = !played.has('BIG_JOKER') && !hand.some(c => c.id === 'BIG_JOKER');
+    // UNLESS: a partner has shown a void in a side suit and I'm short of trumps —
+    // keep my trumps and let the partner ruff instead.
+    const partners = [0, 1, 2, 3, 4, 5].filter(s => s !== seat && Engine.getTeam(s) === myTeam);
+    const partnerRuffs = myT.length <= 3 && partners.some(s => !aiIsVoid(s, trump) &&
+      AI_SUITS.some(su => su !== trump && aiIsVoid(s, su) && hand.some(c => c.suit === su)));
+    if (partnerRuffs) return null;
+    if (!bigJokerOut) return myT[0];                 // master trump is a safe winner
+    if (myT.length >= 4) return myT[myT.length - 1]; // Ace not safe yet: pull trumps with a low one
+    return null;
   }
 
   function aiPlayCard(seat) {
@@ -2456,30 +2558,6 @@ const Game = (() => {
       if (Engine.getTeam(futureSeat) !== myTeam) opponentSeatsAfter.push(futureSeat);
     }
     const teammateWinSafe = teammateWinning && opponentSeatsAfter.length === 0;
-    const teammateWinLikely = teammateWinning && opponentSeatsAfter.length > 0
-      && currentWinner !== null
-      && isTrickWinLikelySecure(trick, trump, opponentSeatsAfter, state);
-
-    // --- Helper: check if winning card is strong enough opponents can't beat it ---
-    function isTrickWinLikelySecure(trickSoFar, trump, oppSeats, st) {
-      const winnerIdx = Engine.determineTrickWinnerRefined(trickSoFar, trump);
-      const winCard = trickSoFar.find(cp => cp.playerIndex === winnerIdx).card;
-      // If winning card is a joker or trump A/K, it's very likely secure
-      if (winCard.id === 'BIG_JOKER') return true;
-      if (winCard.id === 'SMALL_JOKER') {
-        // Safe only if no trump cards in opponents' potential hands
-        return !oppSeats.some(s => (st.hands[s] || []).some(c => c.suit === trump));
-      }
-      if (winCard.suit === trump) {
-        const winVal = Engine.RANK_VALUES[winCard.rank];
-        // Safe if no higher trump left (check opponents' hands)
-        const higherTrumpExists = oppSeats.some(s =>
-          (st.hands[s] || []).some(c => c.suit === trump && Engine.RANK_VALUES[c.rank] > winVal)
-        );
-        return !higherTrumpExists;
-      }
-      return false; // Non-trump lead can easily be beaten
-    }
 
     // --- Context flags ---
     const myTeamBid = state.currentRound.biddingTeam === myTeam;
@@ -2507,12 +2585,26 @@ const Game = (() => {
     const oppWinningWithHighTrump = opponentWinning && currentWinCard &&
       currentWinCard.suit === trump && Engine.RANK_VALUES[currentWinCard.rank] >= 10; // K or A
 
+    // Is the contract still undecided? (a trick that can't change the result is unimportant)
+    const bidNow = state.currentRound.bid || 0;
+    const important = myTeamBid ? teamTricks < bidNow : (oppTricks < bidNow && teamTricks < 10 - bidNow);
+    // Cheapest card that wins; trumping goes through the overtrump check (card #4)
+    const chooseWin = (wins) => {
+      const follow = wins.filter(c => c.suit !== trump && c.suit !== 'joker');
+      if (follow.length) return follow.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+      const trumpWins = wins.filter(c => c.suit === trump);
+      if (trumpWins.length && leadSuit && leadSuit !== trump && trump !== 'notrump') {
+        return aiPickRuff(seat, hand, trumpWins, playable, trump, leadSuit, opponentSeatsAfter, important).card;
+      }
+      return getLowest(wins, trump);
+    };
+
     let chosen;
 
     if (isLeading) {
       chosen = aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam);
 
-    } else if (teammateWinSafe || teammateWinLikely) {
+    } else if (teammateWinSafe) {
       // Teammate winning securely — NEVER use Big Joker here, just dump cheap
       chosen = getDumpCard(playable, trump, leadSuit);
 
@@ -2562,10 +2654,7 @@ const Game = (() => {
         } else if (!shouldUseBigJoker) {
           // Save Big Joker — try to win cheaply without it
           if (cheapWins.length > 0) {
-            const nonTrumpCheap = cheapWins.filter(c => c.suit !== trump);
-            chosen = nonTrumpCheap.length > 0
-              ? nonTrumpCheap.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0]
-              : getLowest(cheapWins, trump);
+            chosen = chooseWin(cheapWins);
           } else {
             chosen = getDumpCard(playable, trump, leadSuit);
           }
@@ -2597,10 +2686,7 @@ const Game = (() => {
         if (useSmallJoker) {
           chosen = playable.find(c => c.id === 'SMALL_JOKER');
         } else if (cheapWins.length > 0) {
-          const nonTrumpCheap = cheapWins.filter(c => c.suit !== trump);
-          chosen = nonTrumpCheap.length > 0
-            ? nonTrumpCheap.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0]
-            : getLowest(cheapWins, trump);
+          chosen = chooseWin(cheapWins);
         } else {
           chosen = getDumpCard(playable, trump, leadSuit);
         }
@@ -2612,12 +2698,7 @@ const Game = (() => {
         });
 
         if (winningCards.length > 0) {
-          const nonTrumpWins = winningCards.filter(c => c.suit !== trump);
-          if (nonTrumpWins.length > 0) {
-            chosen = nonTrumpWins.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
-          } else {
-            chosen = getLowest(winningCards, trump);
-          }
+          chosen = chooseWin(winningCards);
         } else {
           // Can't win — dump to avoid wasting trump
           // Use memory: if opponent is known void in a suit, don't lead that suit next time
@@ -2634,6 +2715,10 @@ const Game = (() => {
   // Choose what to lead with — memory-aware and teammate-coordinated
   function aiChooseLeadCard(seat, hand, playable, trump, playedCards, myTeam) {
     const oppTeam = myTeam === 'A' ? 'B' : 'A';
+
+    // --- PRIORITY 0: bidding team draws trumps before cashing side winners ---
+    const drawLead = aiTrumpDrawLead(seat, hand, playable, trump, myTeam);
+    if (drawLead) return drawLead;
 
     // Identify teammate seats
     const teammateSeats = [0,1,2,3,4,5].filter(s => Engine.getTeam(s) === myTeam && s !== seat);
@@ -2691,17 +2776,22 @@ const Game = (() => {
       for (const v of voids) oppVoidSuits.add(v);
     }
 
-    // 1. Lead a suit opponents are void in (they can't follow, forces trump or dump)
-    const voidLeads = playable.filter(c =>
-      c.suit !== trump && c.suit !== 'joker' && oppVoidSuits.has(c.suit)
-    );
-    if (voidLeads.length > 0) {
-      // Lead highest of that suit — it will win since they're void
-      return voidLeads.sort((a,b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank])[0];
+    // Suits an opponent is void in but can still trump: a high card there gets ruffed
+    const hasTrump = trump && trump !== 'notrump';
+    const ruffDanger = new Set();
+    if (hasTrump) for (const s of oppSeats) for (const v of (aiMemory.suitVoids[s] || [])) {
+      if (!aiIsVoid(s, trump)) ruffDanger.add(v);
     }
 
-    // 2. Lead a suit where we have the Ace (guaranteed win)
-    const aces = playable.filter(c => c.rank === 'A' && c.suit !== trump && c.suit !== 'joker');
+    // 1. A partner is void in a side suit and can still trump: lead it low so they ruff
+    if (hasTrump) {
+      const partnerRuff = playable.filter(c => c.suit !== trump && c.suit !== 'joker' &&
+        teammateSeats.some(t => aiIsVoid(t, c.suit) && !aiIsVoid(t, trump)) && !ruffDanger.has(c.suit));
+      if (partnerRuff.length) return partnerRuff.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+    }
+
+    // 2. Lead a suit where we have the Ace — unless an opponent will ruff it
+    const aces = playable.filter(c => c.rank === 'A' && c.suit !== trump && c.suit !== 'joker' && !ruffDanger.has(c.suit));
     if (aces.length > 0) {
       // Prefer ace of suit NOT in opponents' strong suits
       const safeAces = aces.filter(c => !oppStrongSuits.has(c.suit));
@@ -2717,7 +2807,7 @@ const Game = (() => {
     // 3. Lead a suit where King is now highest (ace played)
     const kings = playable.filter(c => c.rank === 'K' && c.suit !== trump && c.suit !== 'joker');
     for (const k of kings) {
-      if (playedCards.has(`A-${k.suit}`)) return k;
+      if (playedCards.has(`A_${k.suit}`) && !ruffDanger.has(k.suit)) return k;
     }
 
     // 4. Counter human's favourite lead — lead a DIFFERENT suit to confuse
@@ -2733,9 +2823,11 @@ const Game = (() => {
       const nonFav = nonTrump.filter(c => c.suit !== humanFavSuit);
       const pool = nonFav.length > 0 ? nonFav : nonTrump;
 
-      // Avoid suits opponents are strong in
-      const safe = pool.filter(c => !oppStrongSuits.has(c.suit));
-      const finalPool = safe.length > 0 ? safe : pool;
+      // Avoid suits opponents are strong in, or can ruff
+      const noRuff = pool.filter(c => !ruffDanger.has(c.suit));
+      const pool2 = noRuff.length > 0 ? noRuff : pool;
+      const safe = pool2.filter(c => !oppStrongSuits.has(c.suit));
+      const finalPool = safe.length > 0 ? safe : pool2;
 
       // Sort by suit length desc, then within that suit lead second-highest to hide Ace/King
       finalPool.sort((a,b) => (suitLengths[b.suit] || 0) - (suitLengths[a.suit] || 0));
@@ -2834,12 +2926,20 @@ const Game = (() => {
     const tricks = state.currentRound.tricksTaken[state.currentRound.biddingTeam];
     const remaining = 9 - state.currentRound.tricksPlayed;
     // If we've won all 5 so far and have strong cards, go for LS/GS
+    // 8 tricks score 15 with or without a raise, and a failed raise hands the
+    // opponents double. So only raise when this hand alone guarantees the 3
+    // tricks still needed for LS.
     if (tricks === 5 && remaining === 4) {
-      const eval_ = aiEvalHand(state.hands[seat]);
-      if (eval_.strength >= 4) {
-        processRaise(8); // Go for LS
-        return;
+      const hand = state.hands[seat] || [];
+      const trump = state.currentRound.trumpSuit;
+      const played = aiSeen();
+      let sure = hand.some(c => c.id === 'BIG_JOKER') ? 1 : 0;
+      if (trump && trump !== 'notrump') {
+        let masters = hand.filter(c => c.suit === trump && aiHigherTrumpsOut(trump, c.rank, hand, played) === 0).length;
+        if (masters && !played.has('BIG_JOKER') && !sure) masters--; // the unseen Big Joker can take one
+        sure += masters;
       }
+      if (sure >= 3) { processRaise(8); return; }
     }
     processNoRaise();
   }
@@ -3063,6 +3163,11 @@ const Game = (() => {
     getSavedSession, resumeSavedSession, clearSession,
     // Test/diagnostic hooks (read-only views + controlled faults)
     __debug: {
+      // Test-only: let the bot play seat 0 too, so a harness can run all-bot solo games
+      allBots: () => {
+        if (!isSoloMode || !state || !state.players[0]) return false;
+        state.players[0].isAI = true; checkAITurn(); return true;
+      },
       term: () => hostTerm,
       isHost: () => Network.getIsHost(),
       hostPeerId: () => getHostPeerId(),
