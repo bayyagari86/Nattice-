@@ -659,7 +659,7 @@ const UI = (() => {
     if (round.trumpSuit) {
       const TRUMP_BANNER_COLORS = { spades: '#e0e0e0', hearts: '#ff6b6b', diamonds: '#ff8c42', clubs: '#a8d8a8', notrump: '#ffd700', joker: '#c084fc' };
       const trumpText = round.trumpSuit === 'notrump' ? 'No Trump' : `${SUIT_SYMBOLS[round.trumpSuit]} ${round.trumpSuit.toUpperCase()}`;
-      trumpInfo.innerHTML = `Trump: <span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${trumpText}</span>`;
+      trumpInfo.innerHTML = `<span class="lbl-trump">Trump: </span><span class="trump-suit" style="color:${TRUMP_BANNER_COLORS[round.trumpSuit] || '#e0e0e0'}">${trumpText}</span>`;
     } else {
       trumpInfo.textContent = '';
     }

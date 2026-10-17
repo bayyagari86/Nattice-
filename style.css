@@ -2261,3 +2261,13 @@ body.compact-port .table-center-circle { display: none; }
 body.compact-port .table-player:not(.me) { white-space: nowrap; }
 body.compact-port .table-player .player-name { max-width: 74px; overflow: hidden; text-overflow: ellipsis; }
 body.compact-port .diya.d-bl, body.compact-port .diya.d-br { display: none; }
+/* Narrowest phones: drop the "Trump:" word so the suit never clips at the edge */
+@media (max-width: 380px) { body:not(.compact-land) .lbl-trump { display: none; } }
+@media (max-width: 340px) { body:not(.compact-land) .trump-suit { font-size: 11px; } body:not(.compact-land) .game-meta { font-size: 11px; } }
+@media (max-width: 340px) {
+  body:not(.compact-land) .game-topbar { gap: 4px; padding: 6px 5px; }
+  body:not(.compact-land) .score-team { padding: 3px 6px; }
+  body:not(.compact-land) .badges-toggle-btn { padding: 4px 6px; }
+  body:not(.compact-land) .game-meta { min-width: 0; }
+  body:not(.compact-land) #trick-counter { white-space: nowrap; font-size: 10px; }
+}
