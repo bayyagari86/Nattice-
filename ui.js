@@ -515,6 +515,16 @@ const UI = (() => {
   // Last rendered state, so layout can be redrawn on rotation/resize
   let lastRender = null;
 
+  // Phones held sideways: wide but very short table. Seats, trick and HUD
+  // switch to a compact arrangement so nothing overlaps.
+  function isCompactLandscape() {
+    return window.innerWidth > window.innerHeight && window.innerHeight <= 520;
+  }
+  function applyLayoutMode() {
+    document.body.classList.toggle('compact-land', isCompactLandscape());
+  }
+  applyLayoutMode();
+
   // The hand is laid out with pixel positions for the current screen width,
   // so it must be redrawn whenever the viewport changes (rotation, split
   // screen, browser bars). Also keeps action panels docked above the hand.
@@ -528,9 +538,13 @@ const UI = (() => {
   function relayout() {
     clearTimeout(relayoutTimer);
     relayoutTimer = setTimeout(() => {
+      applyLayoutMode();
       if (lastRender && lastRender.state && lastRender.state.hands &&
           document.getElementById('game-screen').classList.contains('active')) {
-        renderHand(lastRender.state, lastRender.mySeat);
+        const { state, mySeat } = lastRender;
+        renderPlayers(state, mySeat);
+        renderHand(state, mySeat);
+        renderTrick(state);
       }
       syncHandHeight();
     }, 120);
@@ -543,6 +557,7 @@ const UI = (() => {
     if (!state) return;
     if (state.phase === 'WAITING') return;
     lastRender = { state, mySeat };
+    applyLayoutMode();
     // Only switch screen once — avoid triggering CSS reflows on every update
     if (state.phase !== 'GAME_OVER') {
       const gameScreen = document.getElementById('game-screen');
@@ -626,7 +641,7 @@ const UI = (() => {
       const isBidder = state.currentRound.bidder === seat;
 
       const el = document.createElement('div');
-      el.className = `table-player ${isCurrentPlayer ? 'active' : ''} team-${team.toLowerCase()}`;
+      el.className = `table-player ${isCurrentPlayer ? 'active' : ''} ${seat === mySeat ? 'me' : ''} team-${team.toLowerCase()}`;
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
 
       // Build card backs HTML for other players
@@ -694,6 +709,17 @@ const UI = (() => {
   }
 
   function getPlayerPositions() {
+    if (isCompactLandscape()) {
+      // Wide, short table: three opponents across the top, one each side
+      return [
+        { x: 50, y: 100 },  // Me — reaction row docked to the bottom edge (CSS)
+        { x: 11, y: 60 },   // Bottom-left
+        { x: 26, y: 15 },   // Top-left
+        { x: 50, y: 15 },   // Top
+        { x: 74, y: 15 },   // Top-right
+        { x: 89, y: 60 },   // Bottom-right
+      ];
+    }
     // 6 positions around table, index 0 = bottom center (me)
     return [
       { x: 50, y: 72 },   // Bottom (me)
@@ -847,6 +873,17 @@ const UI = (() => {
   }
 
   function getTrickCardPositions() {
+    if (isCompactLandscape()) {
+      // Two rows of three, mirroring the seats: top row = top seats
+      return [
+        { x: 50, y: 70 },   // Me
+        { x: 41, y: 70 },   // Left
+        { x: 41, y: 41 },   // Top-left
+        { x: 50, y: 41 },   // Top
+        { x: 59, y: 41 },   // Top-right
+        { x: 59, y: 70 },   // Right
+      ];
+    }
     // Positions closer to center for trick cards
     return [
       { x: 50, y: 62 },   // Me (bottom)
