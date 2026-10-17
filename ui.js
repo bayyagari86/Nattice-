@@ -525,8 +525,10 @@ const UI = (() => {
 
   // Phones held sideways: wide but very short table. Seats, trick and HUD
   // switch to a compact arrangement so nothing overlaps.
+  // Anything landscape up to 700px tall (foldables such as iPhone Duo opened
+  // sideways, small tablets, short laptop windows): full-size seats crowd the trick.
   function isCompactLandscape() {
-    return window.innerWidth > window.innerHeight && window.innerHeight <= 520;
+    return window.innerWidth > window.innerHeight && window.innerHeight <= 700;
   }
   // Short portrait screens (small phones with browser bars showing): same
   // compact seats, arranged for a tall, narrow table.
@@ -840,9 +842,16 @@ const UI = (() => {
     const maxAngle = Math.min(4 * (total - 1), isSmallPhone ? 30 : 36);
     const arcRise = isMobile ? (isSmallPhone ? 14 : 18) : 0;
     const cardW = isMobile ? (isSmallPhone ? 48 : 58) : 58;
-    const overlap = isMobile ? (isSmallPhone ? 22 : 18) : 10;
+    let overlap = isMobile ? (isSmallPhone ? 22 : 18) : 10;
+    const handW = handEl.offsetWidth || window.innerWidth;
+    // Squeeze the fan so it always fits (split screen, folding phones, odd widths);
+    // 28px each side leaves room for the outer cards' tilt.
+    const maxFanW = handW - (isMobile ? 56 : 16);
+    if (isMobile && total > 1 && cardW * total - overlap * (total - 1) > maxFanW) {
+      overlap = Math.ceil((cardW * total - maxFanW) / (total - 1));
+    }
     const totalWidth = cardW * total - overlap * (total - 1);
-    const startX = (handEl.offsetWidth || window.innerWidth) / 2 - totalWidth / 2;
+    const startX = handW / 2 - totalWidth / 2;
 
     sorted.forEach((card, idx) => {
       const isPlayable = !!playable.find(c => c.id === card.id);
