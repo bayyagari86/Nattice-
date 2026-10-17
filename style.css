@@ -2262,10 +2262,9 @@ body:not([data-theme="chaupal"]) #theme-deco .scene-tint, body:not([data-theme="
 /* the cloth under the cards: an SVG trapezoid with converging weave
    (see matSvg in extras.js) — this is what gives the table its depth */
 #theme-deco .persp { position: absolute; inset: 0; }
-#theme-deco .mat-svg { position: absolute; left: 6%; right: 6%; top: 21%; bottom: 11%; width: 88%; height: 68%; opacity: .9;
-  filter: drop-shadow(0 18px 18px rgba(0,0,0,.6)); }
+#theme-deco .mat-svg { position: absolute; left: 6%; right: 6%; top: 21%; bottom: 11%; width: 88%; height: 68%; opacity: 1; }
 body.compact-land #theme-deco .mat-svg { left: 15%; width: 70%; top: 8%; height: 88%; }
-@media (orientation: landscape) and (min-height: 701px) { #theme-deco .mat-svg { left: 18%; width: 64%; top: 22%; height: 70%; opacity: .84; } }
+@media (orientation: landscape) and (min-height: 701px) { #theme-deco .mat-svg { left: 18%; width: 64%; top: 22%; height: 70%; } }
 
 /* ambient particles */
 #theme-deco .scene-fx { position: absolute; inset: 0; pointer-events: none; }

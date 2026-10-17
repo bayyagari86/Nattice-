@@ -127,15 +127,11 @@ const Extras = (() => {
     for (let k = 1; k < nh; k++) { const y = 100 * Math.pow(k / nh, 1.45); lines += `M${lx(y).toFixed(2)},${y.toFixed(2)} L${(100 - lx(y)).toFixed(2)},${y.toFixed(2)} `; }
     const lineCol = theme === 'boita' ? '#2e1a0a' : c;
     return `<svg class="mat-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      <defs><linearGradient id="matg-${theme}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${b}"/><stop offset="1" stop-color="${a}"/></linearGradient>
-      <radialGradient id="mats-${theme}" cx=".5" cy=".55" r=".6"><stop offset="0" stop-color="#fff4dc" stop-opacity=".22"/><stop offset="1" stop-color="#fff4dc" stop-opacity="0"/></radialGradient></defs>
+      <defs><linearGradient id="matg-${theme}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${b}" stop-opacity=".10"/><stop offset="1" stop-color="${a}" stop-opacity=".30"/></linearGradient></defs>
       <polygon points="${trap(0)}" fill="url(#matg-${theme})"/>
-      <path d="${lines}" stroke="${lineCol}" stroke-opacity="${op}" stroke-width="1" vector-effect="non-scaling-stroke" fill="none"/>
-      <polygon points="${trap(0)}" fill="url(#mats-${theme})"/>
-      <polygon points="${trap(1.2)}" fill="none" stroke="${c}" stroke-width="3" vector-effect="non-scaling-stroke"/>
-      <polygon points="${trap(2.6)}" fill="none" stroke="${b}" stroke-width="4" vector-effect="non-scaling-stroke"/>
-      <polygon points="${trap(3.6)}" fill="none" stroke="${c}" stroke-opacity=".6" stroke-width="1.5" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
-      <polygon points="${trap(0)}" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      <path d="${lines}" stroke="${lineCol}" stroke-opacity="${(op * 0.7).toFixed(2)}" stroke-width="1" vector-effect="non-scaling-stroke" fill="none"/>
+      <polygon points="${trap(1.4)}" fill="none" stroke="${c}" stroke-opacity=".45" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+      <polygon points="${trap(3)}" fill="none" stroke="${c}" stroke-opacity=".28" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/>
     </svg>`;
   }
 
