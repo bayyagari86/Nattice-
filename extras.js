@@ -59,6 +59,7 @@ const Extras = (() => {
                 greeting: 'ରଜର ଶୁଭେଚ୍ଛା', greetingEn: 'Happy Raja', mat: ['#2f7d4a', '#174a2a', '#f4a6c0'], fx: 'petals', bg: ['#2f7d4a', '#0a2414'] },
     rath:     { label: 'Rath Yatra', sub: 'Chariots on Bada Danda', art: 'rath', fest: true, emoji: '🛕',
                 greeting: 'ଜୟ ଜଗନ୍ନାଥ', greetingEn: 'Jai Jagannath', mat: ['#c81e1e', '#111111', '#f6c400'], fx: 'motes', bg: ['#c81e1e', '#2a0606'] },
+    utsav:    { label: 'Odisha Utsav', sub: 'Live video · test', art: 'utsav', video: 'utsav_konark', mat: ['#b5652a', '#6b3412', '#2bb3a3'], fx: null, bg: ['#c2702e', '#2a1406'] },
     nuakhai:  { label: 'Nuakhai', sub: 'New rice harvest', art: 'nuakhai', fest: true, emoji: '🌾',
                 greeting: 'ନୂଆଖାଇ ଜୁହାର', greetingEn: 'Nuakhai Juhar', mat: ['#8a1c2b', '#4a0c16', '#f5efe0'], fx: 'motes', bg: ['#8a6a1c', '#1e1606'] },
   };
@@ -152,11 +153,30 @@ const Extras = (() => {
     bs.setProperty('--mat-a', m1); bs.setProperty('--mat-b', m2); bs.setProperty('--mat-c', m3);
     const flies = theme === 'chaupal' ? `<div class="flies">${Array.from({ length: 12 }, (_, i) =>
       `<span class="firefly" style="left:${(i * 29 + 7) % 92 + 3}%;top:${(i * 37 + 12) % 46 + 8}%;animation-delay:${(i % 5) * 0.9}s"></span>`).join('')}</div>` : '';
-    el.innerHTML = `<div class="scene"><div class="scene-img"></div>${t.night ? '<div class="scene-img scene-night"></div>' : ''}</div>
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const saveData = navigator.connection && navigator.connection.saveData;
+    const upright = !window.matchMedia || matchMedia('(orientation: portrait)').matches;
+    const vid = t.video && upright && !reduce && !saveData
+      ? `<video class="scene-video" muted playsinline autoplay preload="auto" src="assets/themes/${t.video}.mp4"></video>` : '';
+    el.innerHTML = `<div class="scene"><div class="scene-img"></div>${t.night ? '<div class="scene-img scene-night"></div>' : ''}${vid}</div>
       <div class="scene-tint"></div>
       <div class="persp">${matSvg(theme, t)}</div>
       <div class="scene-pool"></div><div class="scene-shade"></div>${fxLayer(t.fx)}${flies}`;
     if (theme === 'chaupal') updateLight(lastLightState);
+    const v = el.querySelector('.scene-video');
+    if (v) loopWithFade(v);
+  }
+
+  // Muted ambient clip that dissolves back into its own first frame (the
+  // still behind it) at the end of each pass, so the restart never jumps.
+  function loopWithFade(v) {
+    v.muted = true; v.defaultMuted = true;
+    const play = () => { const p = v.play(); if (p && p.catch) p.catch(() => {}); };
+    v.addEventListener('playing', () => v.classList.add('on'));
+    v.addEventListener('timeupdate', () => { if (v.duration && v.currentTime > v.duration - 1.1) v.classList.remove('on'); });
+    v.addEventListener('ended', () => setTimeout(() => { v.currentTime = 0; play(); }, 900));
+    document.addEventListener('visibilitychange', () => { if (!v.isConnected) return; document.hidden ? v.pause() : play(); });
+    play();
   }
 
   // ---------- Chaupal evening light ----------

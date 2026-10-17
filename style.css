@@ -2293,3 +2293,9 @@ body[data-art]:not([data-theme="classic"]):not([data-theme="dussehra"]):not([dat
   background: repeating-linear-gradient(45deg, var(--mat-a) 0 3px, var(--mat-b) 3px 6px); border-color: var(--mat-c); }
 body[data-art] .table-player .player-meta { color: rgba(255,255,255,.85); }
 body[data-art].compact-land .table-player .player-cards-count { color: rgba(255,255,255,.8); }
+
+/* Odisha Utsav: ambient video over its matching still (upright screens only) */
+#theme-deco .scene-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center top;
+  opacity: 0; transition: opacity .9s ease; }
+#theme-deco .scene-video.on { opacity: 1; }
+@media (orientation: landscape) { #theme-deco .scene-video { display: none; } }
