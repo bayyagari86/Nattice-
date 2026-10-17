@@ -683,7 +683,7 @@ const UI = (() => {
       const isBidder = state.currentRound.bidder === seat;
 
       const el = document.createElement('div');
-      el.className = `table-player ${isCurrentPlayer ? 'active' : ''} ${seat === mySeat ? 'me' : ''} team-${team.toLowerCase()}`;
+      el.className = `table-player ${isCurrentPlayer ? 'active' : ''} ${seat === mySeat ? 'me' : ''} ${i === 3 ? 'seat-top' : ''} team-${team.toLowerCase()}`;
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
 
       // Build card backs HTML for other players
@@ -748,6 +748,27 @@ const UI = (() => {
 
       tableEl.appendChild(el);
     }
+    keepSeatsOnScreen(tableEl);
+  }
+
+  // Narrow screens: a seat whose card fan spills past the table edge is nudged back inside
+  function keepSeatsOnScreen(tableEl) {
+    if (isCompactLandscape()) return;
+    const T = (tableEl.closest('.game-table') || tableEl).getBoundingClientRect();
+    const L = Math.max(T.left, 0) + 2, R = Math.min(T.right, window.innerWidth) - 2;
+    tableEl.querySelectorAll('.table-player:not(.me)').forEach((el) => {
+      const kids = [...el.children].filter(k => !k.classList.contains('reaction-float') && k.getBoundingClientRect().width > 0);
+      if (!kids.length) return;
+      const l = Math.min(...kids.map(k => k.getBoundingClientRect().left));
+      const r = Math.max(...kids.map(k => k.getBoundingClientRect().right));
+      let dx = 0;
+      if (l < L) dx = L - l; else if (r > R) dx = R - r;
+      if (Math.abs(dx) < 1) return;
+      el.style.transition = 'none';
+      el.style.left = `calc(${el.style.left} + ${Math.round(dx)}px)`;
+      void el.offsetWidth;
+      el.style.transition = '';
+    });
   }
 
   function getPlayerPositions() {
@@ -926,6 +947,9 @@ const UI = (() => {
         { x: 59, y: 70 },   // Right
       ];
     }
+    // Fit the trick between the top seat and my own seat so cards never sit on a name
+    const fitted = fitTrickPositions();
+    if (fitted) return fitted;
     // Positions closer to center for trick cards
     return [
       { x: 50, y: 62 },   // Me (bottom)
@@ -934,6 +958,30 @@ const UI = (() => {
       { x: 50, y: 28 },   // Top
       { x: 65, y: 35 },   // Top-right
       { x: 65, y: 52 },   // Right
+    ];
+  }
+
+  function fitTrickPositions() {
+    const table = document.querySelector('.game-table');
+    const top = document.querySelector('#player-positions .table-player.seat-top');
+    const meAv = document.querySelector('#player-positions .table-player.me .player-avatar');
+    if (!table || !top || !meAv) return null;
+    const T = table.getBoundingClientRect();
+    if (T.height < 200) return null;
+    const half = (window.innerWidth <= 640 ? 68 : 70) / 2 + 8;   // half a trick card incl. its label
+    const lo = top.getBoundingClientRect().bottom - T.top + 4 + half;
+    const hi = meAv.getBoundingClientRect().top - T.top - 4 - half;
+    if (!(hi > lo)) return null;
+    const topC = lo, meC = Math.max(lo + 2 * half, hi);
+    const mid = (topC + meC) / 2, gap = Math.max(half + 2, (meC - topC) * 0.25);
+    const pct = (px) => Math.max(0, Math.min(100, (px / T.height) * 100));
+    return [
+      { x: 50, y: pct(meC) },        // Me (bottom)
+      { x: 35, y: pct(mid + gap) },  // Left
+      { x: 35, y: pct(mid - gap) },  // Top-left
+      { x: 50, y: pct(topC) },       // Top
+      { x: 65, y: pct(mid - gap) },  // Top-right
+      { x: 65, y: pct(mid + gap) },  // Right
     ];
   }
 
