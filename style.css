@@ -973,8 +973,12 @@ html, body {
   align-items: center;
   gap: 14px;
   position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
+  /* Docked just above the hand so it never covers your cards */
+  top: auto; left: 50%;
+  bottom: calc(var(--hand-h, 130px) + 8px);
+  transform: translateX(-50%);
+  max-height: calc(100dvh - var(--hand-h, 130px) - 16px);
+  overflow-y: auto;
   width: min(92vw, 360px);
   background: var(--bg-surface);
   border: 1px solid var(--border-bright);
@@ -985,8 +989,20 @@ html, body {
   animation: panelPop 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes panelPop {
-  from { opacity: 0; transform: translate(-50%, -48%) scale(0.95); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: translate(-50%, 8px) scale(0.97); }
+  to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+/* Short screens (phones in landscape): compact panels so they fit above the hand */
+@media (max-height: 520px) {
+  #bidding-panel, #trump-select-panel, #raise-panel {
+    gap: 6px; padding: 10px 14px 12px; width: min(94vw, 520px);
+  }
+  #bidding-panel .bid-title, #trump-select-panel .bid-title, #raise-panel .bid-title { margin-bottom: 2px; }
+  #bidding-panel .bid-history {
+    flex-direction: row; flex-wrap: wrap; justify-content: center;
+    gap: 4px 12px; max-width: none; margin-bottom: 4px; padding: 6px 10px;
+  }
+  #bidding-panel .bid-history-item { gap: 4px; }
 }
 .bid-title {
   font-size: 13px; font-weight: 700;

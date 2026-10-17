@@ -512,9 +512,37 @@ const UI = (() => {
   }
 
   // === GAME TABLE ===
+  // Last rendered state, so layout can be redrawn on rotation/resize
+  let lastRender = null;
+
+  // The hand is laid out with pixel positions for the current screen width,
+  // so it must be redrawn whenever the viewport changes (rotation, split
+  // screen, browser bars). Also keeps action panels docked above the hand.
+  function syncHandHeight() {
+    const area = document.querySelector('.hand-area');
+    if (!area) return;
+    const h = area.getBoundingClientRect().height;
+    if (h > 0) document.documentElement.style.setProperty('--hand-h', Math.round(h) + 'px');
+  }
+  let relayoutTimer = null;
+  function relayout() {
+    clearTimeout(relayoutTimer);
+    relayoutTimer = setTimeout(() => {
+      if (lastRender && lastRender.state && lastRender.state.hands &&
+          document.getElementById('game-screen').classList.contains('active')) {
+        renderHand(lastRender.state, lastRender.mySeat);
+      }
+      syncHandHeight();
+    }, 120);
+  }
+  window.addEventListener('resize', relayout);
+  window.addEventListener('orientationchange', relayout);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', relayout);
+
   function updateAll(state, mySeat) {
     if (!state) return;
     if (state.phase === 'WAITING') return;
+    lastRender = { state, mySeat };
     // Only switch screen once — avoid triggering CSS reflows on every update
     if (state.phase !== 'GAME_OVER') {
       const gameScreen = document.getElementById('game-screen');
@@ -530,6 +558,7 @@ const UI = (() => {
     renderBiddingUI(state, mySeat);
     renderTrumpSelectUI(state, mySeat);
     renderRaiseUI(state, mySeat);
+    syncHandHeight();
   }
 
   function renderScoreboard(state, mySeat) {
@@ -730,7 +759,7 @@ const UI = (() => {
       const y = isMobile ? (arcRise - yOffset) : 0;
 
       const cardEl = document.createElement('div');
-      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${!isMyTurn ? 'waiting' : ''} ${isTrump ? 'trump-card' : ''} ${card.suit === 'joker' ? 'joker-card' : ''}`;
+      cardEl.className = `card ${isPlayable ? 'playable' : ''} ${state.phase === 'PLAYING' && !isMyTurn ? 'waiting' : ''} ${isTrump ? 'trump-card' : ''} ${card.suit === 'joker' ? 'joker-card' : ''}`;
       cardEl.dataset.cardId = card.id;
       cardEl.style.cssText = isMobile
         ? `left:${x}px; top:${y}px; transform:rotate(${angle}deg); z-index:${idx + 1};`
