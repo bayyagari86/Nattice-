@@ -2001,51 +2001,13 @@ body[data-theme="chaupal"] .game-table {
 body[data-theme="chaupal"] .game-table::after { border: 0; }
 body[data-theme="chaupal"] .table-center-circle { border: 1px dashed rgba(255,220,160,.18); }
 body[data-theme="chaupal"] #theme-deco > * { position: absolute; pointer-events: none; }
-.chaupal-sky { inset: 0 0 auto 0; height: 46%; z-index: 1;
-  background: linear-gradient(180deg, var(--sky, #ffd682) 0%, transparent 100%); opacity: .8; transition: background 4s ease; }
-.chaupal-sun { right: 13%; top: var(--sun-top, 4%); width: 44px; height: 44px; border-radius: 50%; z-index: 2;
-  background: radial-gradient(circle at 45% 40%, #fff7c2, #ffc94d 45%, #ff8a3d 100%);
-  box-shadow: 0 0 30px 12px rgba(255,170,70,.45); opacity: var(--sun-op, 1); transition: top 4s ease, opacity 4s ease; }
-.chaupal-moon { right: 15%; top: 5%; width: 34px; height: 34px; border-radius: 50%; z-index: 2;
-  background: radial-gradient(circle at 38% 36%, #fff, #eef2ff 50%, #c7d2fe);
-  box-shadow: 0 0 26px 8px rgba(224,231,255,.3); opacity: var(--moon-op, 0); transition: opacity 4s ease; }
-.chaupal-mat { inset: 13% 6% 7%; border-radius: 50%; z-index: 3;
-  background:
-    repeating-linear-gradient(45deg, rgba(246,214,150,.20) 0 7px, rgba(120,78,36,.14) 7px 14px),
-    repeating-linear-gradient(-45deg, rgba(246,214,150,.14) 0 7px, transparent 7px 14px),
-    rgba(196,146,84,.38);
-  border: 4px solid rgba(110,64,26,.65); box-shadow: inset 0 0 0 3px rgba(240,200,130,.25), 0 8px 24px rgba(0,0,0,.35); }
-.chaupal-shade { inset: 0; z-index: 4; background: rgb(12,14,40); opacity: var(--shade, .04); transition: opacity 4s ease; }
-.chaupal-pool { inset: 0; z-index: 5; opacity: var(--lamp, 0); transition: opacity 4s ease;
-  background: radial-gradient(ellipse 48% 42% at 50% 52%, rgba(255,190,90,.30), transparent 72%); }
-.canopy { top: -5%; left: -4%; right: -4%; height: 20%; z-index: 6; }
-.leaf-blob { position: absolute; border-radius: 50%;
-  background: radial-gradient(circle at 40% 35%, #5d8a36, #2e4d1b 60%, #182a0e);
-  filter: brightness(calc(1 - var(--dusk, 0) * .55)); transition: filter 4s ease; }
-.root { top: 9%; width: 2px; z-index: 6; border-radius: 1px; transform-origin: top center;
-  background: linear-gradient(#3b2a14, rgba(59,42,20,0)); animation: rootSway 6s ease-in-out infinite alternate; }
-@keyframes rootSway { from { transform: rotate(-2deg); } to { transform: rotate(2deg); } }
-.lantern { left: 30%; top: 0; width: 18px; height: 22%; z-index: 7; }
-.lantern .l-wire { position: absolute; left: 8px; top: 0; width: 2px; height: calc(100% - 20px); background: rgba(40,28,12,.9); }
-.lantern .l-body { position: absolute; left: 1px; bottom: 0; width: 16px; height: 20px; border-radius: 4px 4px 6px 6px;
-  border: 2px solid #c08a2e; background: radial-gradient(circle at 50% 60%, #fff3b0, #ffb340 60%, #9a5a12);
-  filter: brightness(calc(.55 + var(--lamp, 0) * .6)); transition: filter 4s ease; }
-.lantern .l-glow { position: absolute; left: -46px; bottom: -40px; width: 110px; height: 110px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,196,90,.55), rgba(255,170,60,0) 70%);
-  opacity: var(--lamp, 0); transition: opacity 4s ease; animation: lampFlicker 2.6s ease-in-out infinite alternate; }
-@keyframes lampFlicker { 0% { transform: scale(1); } 40% { transform: scale(1.06); } 70% { transform: scale(.97); } 100% { transform: scale(1.03); } }
 .flies { inset: 0; z-index: 7; opacity: var(--fly, 0); transition: opacity 4s ease; }
 .firefly { position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #f7f58a;
   box-shadow: 0 0 8px 3px rgba(247,245,138,.6); animation: firefly 5s ease-in-out infinite; }
 @keyframes firefly { 0%,100% { transform: translate(0,0); opacity: .2; } 30% { opacity: 1; } 50% { transform: translate(14px,-10px); opacity: .5; } 75% { transform: translate(-8px,6px); opacity: 1; } }
 body[data-theme="chaupal"] .card-back, body[data-theme="chaupal"] .deal-card {
   background: repeating-linear-gradient(45deg, #8a5628 0 3px, #5e3815 3px 6px); border-color: rgba(240,200,140,.55); }
-body.compact-land .canopy { height: 24%; }
-body.compact-land .lantern { left: 38%; height: 20%; }
-body.compact-land .chaupal-sun { width: 32px; height: 32px; right: 8%; }
-body.compact-land .chaupal-moon { width: 26px; height: 26px; right: 9%; }
-body.compact-land .chaupal-mat { inset: 10% 4% 4%; }
-@media (prefers-reduced-motion: reduce) { .root, .lantern .l-glow, .firefly { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .firefly { animation: none; } }
 
 /* ============================================================
    SETTINGS — bot speed & names
@@ -2271,3 +2233,63 @@ body.compact-port .diya.d-bl, body.compact-port .diya.d-br { display: none; }
   body:not(.compact-land) .game-meta { min-width: 0; }
   body:not(.compact-land) #trick-counter { white-space: nowrap; font-size: 10px; }
 }
+
+/* ============================================================
+   ILLUSTRATED SCENES — chaupal + Odisha festivals
+   Layers (back→front): scene art, light tint, cloth/mat in
+   perspective, lamp pool, readability shade, ambient particles.
+   Seats and cards stay flat on top so play is unaffected.
+   ============================================================ */
+body[data-art] .game-table { background: #140d07; }
+body[data-art] .game-table::before { opacity: 0; }
+body[data-art] .game-table::after { border: 0; }
+body[data-art] .table-center-circle { opacity: 0; }
+#theme-deco .scene { position: absolute; inset: -2%; transform-origin: 50% 25%; animation: sceneDrift 80s ease-in-out infinite alternate; }
+#theme-deco .scene-img { position: absolute; inset: 0; background: var(--art-p) center top / cover no-repeat; }
+#theme-deco .scene-night { background-image: var(--night-p); opacity: var(--night, 0); transition: opacity 4s ease; }
+@media (orientation: landscape) {
+  #theme-deco .scene-img { background-image: var(--art-l); background-position: center 18%; }
+  #theme-deco .scene-night { background-image: var(--night-l); }
+}
+@keyframes sceneDrift { from { transform: scale(1); } to { transform: scale(1.05) translateY(-0.8%); } }
+#theme-deco .scene-tint { position: absolute; inset: 0; background: var(--sky, transparent); mix-blend-mode: soft-light; opacity: var(--tint, 0); transition: opacity 4s ease, background 4s ease; }
+#theme-deco .scene-pool { position: absolute; inset: 0; opacity: var(--lamp, 0); transition: opacity 4s ease;
+  background: radial-gradient(ellipse 52% 38% at 50% 56%, rgba(255,184,86,.26), transparent 72%); }
+body:not([data-theme="chaupal"]) #theme-deco .scene-tint, body:not([data-theme="chaupal"]) #theme-deco .scene-pool { display: none; }
+#theme-deco .scene-shade { position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,.34) 0%, rgba(0,0,0,.06) 24%, rgba(0,0,0,0) 46%, rgba(0,0,0,.12) 78%, rgba(0,0,0,.5) 100%); }
+
+/* the cloth under the cards: an SVG trapezoid with converging weave
+   (see matSvg in extras.js) — this is what gives the table its depth */
+#theme-deco .persp { position: absolute; inset: 0; }
+#theme-deco .mat-svg { position: absolute; left: 6%; right: 6%; top: 21%; bottom: 11%; width: 88%; height: 68%; opacity: .9;
+  filter: drop-shadow(0 18px 18px rgba(0,0,0,.6)); }
+body.compact-land #theme-deco .mat-svg { left: 15%; width: 70%; top: 8%; height: 88%; }
+@media (orientation: landscape) and (min-height: 701px) { #theme-deco .mat-svg { left: 18%; width: 64%; top: 22%; height: 70%; opacity: .84; } }
+
+/* ambient particles */
+#theme-deco .scene-fx { position: absolute; inset: 0; pointer-events: none; }
+#theme-deco .scene-fx span { position: absolute; border-radius: 50%; }
+.fx-stars { width: 2px; height: 2px; background: #eef2ff; animation: twinkle 3s ease-in-out infinite; }
+.fx-motes { width: 3px; height: 3px; background: rgba(255,232,170,.75); box-shadow: 0 0 6px rgba(255,220,140,.6); animation: moteFloat 9s ease-in-out infinite; }
+.fx-embers { width: 3px; height: 3px; background: #ffb547; box-shadow: 0 0 8px 2px rgba(255,150,40,.7); animation: emberRise 7s linear infinite; }
+.fx-glints { width: 4px; height: 4px; background: #ffd56b; box-shadow: 0 0 10px 3px rgba(255,200,80,.6); animation: twinkle 2.2s ease-in-out infinite; }
+.fx-colours { width: 70px; height: 70px; filter: blur(16px); opacity: .35; animation: colourDrift 12s ease-in-out infinite alternate;
+  background: hsl(calc(var(--i) * 72 + 300) 90% 60%); }
+.fx-petals { width: 9px !important; height: 5px; border-radius: 60% 0 60% 0 !important; background: #f9a8c9; animation: petalFall 10s linear infinite; }
+@keyframes moteFloat { 0%,100% { transform: translate(0,0); opacity: .15; } 50% { transform: translate(10px,-26px); opacity: .9; } }
+@keyframes emberRise { 0% { transform: translate(0,0); opacity: 0; } 15% { opacity: 1; } 100% { transform: translate(14px,-120px); opacity: 0; } }
+@keyframes colourDrift { from { transform: translate(-20px,10px) scale(.8); } to { transform: translate(30px,-30px) scale(1.25); } }
+@keyframes petalFall { 0% { transform: translate(0,-60px) rotate(0); opacity: 0; } 10% { opacity: .9; } 100% { transform: translate(-40px,160px) rotate(540deg); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #theme-deco .scene, #theme-deco .scene-fx span { animation: none; } }
+
+/* seats stay readable over the art */
+body[data-art] .table-player .player-name, body[data-art] .table-player .player-meta, body[data-art] .table-player .player-cards-count { text-shadow: 0 1px 3px rgba(0,0,0,.95), 0 0 8px rgba(0,0,0,.6); }
+body[data-art] .trick-card { filter: drop-shadow(0 10px 14px rgba(0,0,0,.65)); }
+
+/* card backs for the new festival themes take the theme cloth colours */
+body[data-art]:not([data-theme="classic"]):not([data-theme="dussehra"]):not([data-theme="kumar"]):not([data-theme="chaupal"]) .card-back,
+body[data-art]:not([data-theme="classic"]):not([data-theme="dussehra"]):not([data-theme="kumar"]):not([data-theme="chaupal"]) .deal-card {
+  background: repeating-linear-gradient(45deg, var(--mat-a) 0 3px, var(--mat-b) 3px 6px); border-color: var(--mat-c); }
+body[data-art] .table-player .player-meta { color: rgba(255,255,255,.85); }
+body[data-art].compact-land .table-player .player-cards-count { color: rgba(255,255,255,.8); }

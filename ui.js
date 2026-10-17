@@ -648,7 +648,7 @@ const UI = (() => {
     const bidInfo = document.getElementById('bid-info');
     if (round.bid > 0) {
       const bidder = state.players[round.bidder];
-      bidInfo.textContent = `Bid ${round.bid} · ${bidder ? bidder.name : '?'} (${round.biddingTeam})`;
+      bidInfo.textContent = `Bid ${round.bid} · ${bidder ? bidder.name : '?'} (${round.biddingTeam || Engine.getTeam(round.bidder)})`;
     } else if (state.phase === 'BIDDING') {
       const currentBidder = state.players[round.currentBidder];
       bidInfo.textContent = currentBidder ? `${currentBidder.name} bidding…` : 'Bidding…';

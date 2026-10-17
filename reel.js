@@ -122,7 +122,7 @@ const Reel = (() => {
     ctx.restore();
   }
   function bg(ctx, s, t) {
-    const [a, b] = BG[s.theme] || BG.classic;
+    const [a, b] = (typeof Extras !== 'undefined' && Extras.themeColors) ? Extras.themeColors(s.theme) : (BG[s.theme] || BG.classic);
     const g = ctx.createRadialGradient(W / 2, H * 0.45, 60, W / 2, H * 0.5, H * 0.75);
     g.addColorStop(0, a); g.addColorStop(1, b); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     // drifting glints
