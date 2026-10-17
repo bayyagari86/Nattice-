@@ -123,10 +123,11 @@ const Game = (() => {
 
     // Seat player at 0, AI at 1-5
     state.players[0] = { id: myPlayerId, name: myName, seat: 0, peerId: null, connected: true, isAI: false };
+    const botNames = pickBotNames(5, [myName]);
     for (let i = 1; i < 6; i++) {
       state.players[i] = {
         id: 'AI_' + i,
-        name: AI_NAMES[i - 1],
+        name: botNames[i - 1],
         seat: i,
         peerId: null,
         connected: true,
@@ -134,7 +135,7 @@ const Game = (() => {
       };
     }
 
-    UI.showToast('Game started \u2014 you are on Team A with ' + AI_NAMES[1] + ' & ' + AI_NAMES[3]);
+    UI.showToast('Game started \u2014 you are on Team A with ' + botNames[1] + ' & ' + botNames[3]);
     startAINameRotation();
     startNewRound();
   }
@@ -154,6 +155,31 @@ const Game = (() => {
         state.players[i].name = newName;
       }
     }
+  }
+
+  // Bot names come from the player's settings (hostel nicknames / friends) or the classic list
+  function pickBotNames(n, avoid) {
+    let names = null;
+    try { if (typeof Extras !== 'undefined' && Extras.getBotNames) names = Extras.getBotNames(n, avoid); } catch (_) {}
+    if (!names || names.length < n) {
+      const base = names || [];
+      for (const c of AI_NAMES) { if (base.length >= n) break; if (!base.includes(c) && !(avoid || []).includes(c)) base.push(c); }
+      let k = 1; while (base.length < n) base.push(`Bot ${k++}`);
+      names = base;
+    }
+    return names.slice(0, n);
+  }
+  // Settings changed mid-game: rename the bots now (solo, or as host in an online game)
+  function applyBotNames() {
+    if (!state || !state.players) return;
+    if (!isSoloMode && !Network.getIsHost()) return;
+    const bots = state.players.filter(p => p && p.isAI);
+    if (!bots.length) return;
+    const humans = state.players.filter(p => p && !p.isAI).map(p => p.name);
+    const names = pickBotNames(bots.length, humans);
+    bots.forEach((p, i) => { p.name = names[i]; });
+    broadcastState();
+    UI.updateAll(state, mySeat);
   }
 
   function startAINameRotation() { /* no-op — names now rotate between rounds */ }
@@ -185,6 +211,12 @@ const Game = (() => {
     } catch (_) { return 1; }
   })();
   const d = (ms) => Math.max(20, Math.round(ms * SPEED));
+  function botPlayMs() {
+    try { if (typeof Extras !== 'undefined' && Extras.getBotDelayMs) return Extras.getBotDelayMs(); } catch (_) {}
+    return 2000;
+  }
+  // Slower bot speeds also give a little longer to look at a finished trick
+  const trickPauseMs = () => Math.round(1200 * Math.max(0.75, Math.min(1.7, botPlayMs() / 2000)));
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   let turnTimer = null;
@@ -1611,11 +1643,14 @@ const Game = (() => {
     }
 
     // Fill empty seats with AI placeholders
+    const emptySeats = [0, 1, 2, 3, 4, 5].filter(i => !state.players[i]).length;
+    const fillNames = pickBotNames(emptySeats, state.players.filter(Boolean).map(p => p.name));
+    let fillIdx = 0;
     for (let i = 0; i < 6; i++) {
       if (!state.players[i]) {
         state.players[i] = {
           id: 'AI_' + i,
-          name: `Bot ${i + 1}`,
+          name: fillNames[fillIdx++] || `Bot ${i + 1}`,
           seat: i,
           peerId: null,
           connected: true,
@@ -1918,8 +1953,10 @@ const Game = (() => {
       bcast({ type: 'CARD_PLAYED', seat, cardId, seq: cardPlaySeqCounter });
     }
 
-    // Add to current trick
+    // Add to current trick (remember who was winning, for bot table talk)
+    const trickBefore = state.currentRound.currentTrick.slice();
     state.currentRound.currentTrick.push({ playerIndex: seat, card });
+    try { botTalkOnCard(trickBefore, seat, card); } catch (_) {}
 
     if (state.currentRound.currentTrick.length === 6) {
       // Trick complete — determine winner
@@ -1932,6 +1969,7 @@ const Game = (() => {
       state.currentRound.tricksPlayed++;
 
       const trickCards = [...state.currentRound.currentTrick];
+      try { botTalkOnTrick(winnerTeam); } catch (_) {}
       // Update AI memory from this completed trick
       updateAiMemoryFromTrick(trickCards, state.currentRound.trumpSuit);
       state.currentRound.tricks.push({
@@ -1963,7 +2001,7 @@ const Game = (() => {
       setTimeout(() => {
         if (!state || (!isSoloMode && (!Network.getIsHost() || hostTerm !== termAtTrick))) return;
         advanceAfterTrick(winner);
-      }, d(1200));
+      }, d(trickPauseMs()));
       return true;
     }
 
@@ -2253,7 +2291,7 @@ const Game = (() => {
 
     let delay;
     if (state.phase === 'PLAYING') {
-      delay = 2000; // AI card play: 2 seconds
+      delay = botPlayMs(); // AI card play: player's chosen speed (default 2 seconds)
     } else if (state.phase === 'BIDDING' || state.phase === 'TRUMP_SELECT') {
       delay = isSoloMode ? 1000 + Math.random() * 500 : 1500 + Math.random() * 1000;
     } else {
@@ -2859,6 +2897,80 @@ const Game = (() => {
     UI.showEmojiReaction(emoji, mySeat);
   }
 
+  // ===== BOT TABLE TALK (host decides, everyone sees the same line) =====
+  // Each bot has a flavour by seat: village taunter, classic Odia, Hinglish/English.
+  const TALK = {
+    trumpedVictim: [['କଣ କଲା ସେ! 😮', 'ଟ୍ରମ୍ପ କାହିଁ ଲୁଚାଇଛୁ? 🃏'], ['କଣ କଲା ସେ! 😮', 'ଆରେ ବାପା ରେ! 😱'], ['What did he just do?! 😮', 'କଣ କଲା ସେ! 😮']],
+    trumpedPartner: [['ବାହା ରେ ବାହା! 👏', 'ଦେଖିଲୁ ନା, କେମିତି ନେଲି! 😏'], ['ଏକଦମ୍ ସଟ୍! 🎯', 'ବାହା ରେ ବାହା! 👏'], ["That's teamwork! 🙌", 'Well played! 👏']],
+    jokerBrag: [['ଏଇଟା ଧମାକା! 🔥', 'ଦମ୍ ଅଛି ତ ଆ! 💥'], ['ଏଇଟା ଧମାକା! 🔥', 'ବାପ୍ରେ ବାପ୍! 😎'], ['Too easy! 😏', 'ଏଇଟା ଧମାକା! 🔥']],
+    jokerVictim: [['ଆରେ ବାପା ରେ! 😱', 'ଭାଇ, ଟିକେ ଦୟା କର! 🙏'], ['ଆରେ ବାପା ରେ! 😱', 'କପାଳ ଖରାପ! 😩'], ['What did he just do?! 😮', 'Pure luck, no skill! 🍀']],
+    bidMadeUs: [['ଜବରଦସ୍ତ ଖେଳ! 💪', 'ଘରକୁ ଯା, ପିଲା! 🏠'], ['ଜବରଦସ୍ତ ଖେଳ! 💪', 'ବାହା ରେ ବାହା! 👏'], ["That's teamwork! 🙌", 'Too easy! 😏']],
+    bidMadeThem: [['କପାଳ ଖରାପ! 😩', 'ଆସନ୍ତା ଥର ଦେଖିବା! ⏳'], ['ମାଛ ପରି ଖସିଗଲା! 🐟', 'କପାଳ ଖରାପ! 😩'], ['Revenge next round! 🔥', 'Wait and watch! ⏳']],
+    bidBrokenUs: [['ଯା, ଚା ପିଇ ଆସ! ☕', 'ଘରକୁ ଯା, ପିଲା! 🏠'], ['ତୋ ଭାଗ୍ୟ ଭଲ, ଖେଳ ନୁହେଁ! 🍀', 'ବାହା ମହାରଥୀ, ବାହା! ⚔️'], ['Go have some chai! ☕', "Bas? That's all you got? 👉"]],
+    bidBrokenThem: [['ପୁଣି ସେଇ ଭୁଲ! 🤦', 'ମୁଣ୍ଡ ଗରମ କର ନା! 🌶️'], ['କପାଳ ଖରାପ! 😩', 'ଭାଇ, ଟିକେ ଦୟା କର! 🙏'], ['Same mistake again?! 🤦', 'Partner, are you with me? 🤝']],
+  };
+  let botTalkLastAt = 0, botTalkTrickKey = null;
+  function botTalkEnabled() {
+    if (!state || (!isSoloMode && !Network.getIsHost())) return false;
+    try { if (typeof Sound !== 'undefined' && Sound.getTalk() === 'off') return false; } catch (_) {}
+    return true;
+  }
+  function botSay(seat, kind, chance) {
+    const p = state.players[seat];
+    if (!p || !p.isAI || !botTalkEnabled()) return false;
+    const now = Date.now();
+    if (now - botTalkLastAt < 5000 || Math.random() > chance) return false;
+    const opts = TALK[kind][seat % 3];
+    const phrase = opts[Math.floor(Math.random() * opts.length)];
+    botTalkLastAt = now;
+    const delayMs = 450 + Math.random() * 500; // a beat, like a real reaction
+    setTimeout(() => {
+      if (!state) return;
+      if (!isSoloMode) bcast({ type: 'EMOJI_REACTION', emoji: phrase, seat });
+      UI.showEmojiReaction(phrase, seat);
+    }, delayMs);
+    return true;
+  }
+  // Pick a bot from a team (prefer one other than `not`)
+  function botOf(team, not) {
+    const seats = [0, 1, 2, 3, 4, 5].filter(s => Engine.getTeam(s) === team && s !== not && state.players[s] && state.players[s].isAI);
+    return seats.length ? seats[Math.floor(Math.random() * seats.length)] : null;
+  }
+  function botTalkOnCard(trickBefore, seat, card) {
+    if (!botTalkEnabled() || !trickBefore.length) return;
+    const trump = state.currentRound.trumpSuit;
+    const key = `${trickBefore[0].card.id}`;
+    if (botTalkTrickKey === key) return; // one line per trick
+    const prev = Engine.determineTrickWinnerRefined(trickBefore, trump);
+    const now = Engine.determineTrickWinnerRefined([...trickBefore, { playerIndex: seat, card }], trump);
+    if (now !== seat || prev === seat) return;
+    const prevCard = (trickBefore.find(c => c.playerIndex === prev) || {}).card;
+    const myTeam = Engine.getTeam(seat), prevTeam = Engine.getTeam(prev);
+    if (myTeam === prevTeam) return; // overtaking your own partner isn't drama
+    let said = false;
+    if (card.suit === 'joker') {
+      said = botSay(seat, 'jokerBrag', 0.85) || botSay(prev, 'jokerVictim', 0.8);
+    } else if (trump && card.suit === trump && prevCard && prevCard.suit !== trump && prevCard.suit !== 'joker') {
+      said = botSay(prev, 'trumpedVictim', 0.75);
+      if (!said) { const mate = botOf(myTeam, seat); if (mate !== null) said = botSay(mate, 'trumpedPartner', 0.5); }
+    }
+    if (said) botTalkTrickKey = key;
+  }
+  function botTalkOnTrick(winnerTeam) {
+    if (!botTalkEnabled()) return;
+    const r = state.currentRound;
+    const bt = r.biddingTeam, dt = bt === 'A' ? 'B' : 'A';
+    if (!bt || !r.bid) return;
+    const got = r.tricksTaken[bt] || 0, def = r.tricksTaken[dt] || 0;
+    const breakAt = 9 - r.bid + 1;
+    // The exact trick that decided it
+    if (winnerTeam === bt && got === r.bid) {
+      const s = botOf(bt); if (s === null || !botSay(s, 'bidMadeUs', 0.8)) { const o = botOf(dt); if (o !== null) botSay(o, 'bidMadeThem', 0.7); }
+    } else if (winnerTeam === dt && def === breakAt) {
+      const s = botOf(dt); if (s === null || !botSay(s, 'bidBrokenUs', 0.8)) { const o = botOf(bt); if (o !== null) botSay(o, 'bidBrokenThem', 0.7); }
+    }
+  }
+
   // Sanitize state before sending: hide every hand, expose only counts
   function sanitizeStateForClient(s) {
     const clean = JSON.parse(JSON.stringify(s));
@@ -2946,7 +3058,7 @@ const Game = (() => {
     getState, getMySeat, getMyTeam,
     makeBid, selectTrump, playCard,
     raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji,
-    stopAINameRotation,
+    stopAINameRotation, applyBotNames,
     kickPlayer,
     getSavedSession, resumeSavedSession, clearSession,
     // Test/diagnostic hooks (read-only views + controlled faults)

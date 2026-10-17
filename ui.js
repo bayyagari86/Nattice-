@@ -12,6 +12,7 @@ const UI = (() => {
   };
 
   let toastTimeout = null;
+  const glow = { key: null, seat: null, len: 0, shakeUntil: 0 };
 
   let badgePopupTimeout = null;
 
@@ -54,6 +55,7 @@ const UI = (() => {
 
   function init() {
     if (typeof Extras !== 'undefined') Extras.init();
+    wireTrickDrawer();
     // Track console errors for automation
     if (!window.consoleErrors) {
       window.consoleErrors = [];
@@ -580,6 +582,9 @@ const UI = (() => {
     renderTrumpSelectUI(state, mySeat);
     renderRaiseUI(state, mySeat);
     renderBidProgress(state, mySeat);
+    renderTrickDrawer(state, mySeat);
+    hostWatch(state, mySeat);
+    if (typeof Extras !== 'undefined' && Extras.updateLight) Extras.updateLight(state);
     if (state.phase === 'BIDDING' && typeof Extras !== 'undefined') Extras.greetIfFestival();
     syncHandHeight();
   }
@@ -705,22 +710,14 @@ const UI = (() => {
       }
 
       // Odia quirky phrase reactions — label on button, full Odia script phrase floats
-      const ODIA_REACTIONS = [
-        { label: '👍 ସହି!',    phrase: 'ସହି ବାତ! 👍',              chat: 'ସହି ବାତ! 👍' },
-        { label: '😮 ଏ କି!',  phrase: 'ଏ କି ହେଲା?! 😮',            chat: 'ଏ କି ହେଲା?! 😮' },
-        { label: '🔥 ଧମାକା!', phrase: 'ଏଇଟା ଧମାକା! 🔥',           chat: 'ଏଇଟା ଧମାକା! 🔥' },
-        { label: '😂 ଦାଦା!',  phrase: 'ଦାଦା, କଣ କଲେ? 😂',          chat: 'ଦାଦା, କଣ କଲେ? 😂' },
-        { label: '🃏 ଜୋକର!',  phrase: 'ଜୋକର ଦେବ ନାହିଁ! 🃏',       chat: 'ଜୋକର ଦେବ ନାହିଁ! 🃏' },
-        { label: '😤 ହୁଁ!',   phrase: 'ହଁ ହଁ! ହୁଁ! 😤',            chat: 'ହଁ ହଁ! ହୁଁ! 😤' },
-        { label: '💪 ଜବରଦସ୍ତ!', phrase: 'ଜବରଦସ୍ତ ଖେଳ! 💪',        chat: 'ଜବରଦସ୍ତ ଖେଳ! 💪' },
-        { label: '🤔 କଣ?',    phrase: 'ଏଇଟା କଣ କଲ? 🤔',          chat: 'ଏଇଟା କଣ କଲ? 🤔' },
-        { label: '😎 ବାପ୍ରେ!', phrase: 'ବାପ୍ରେ ବାପ୍! 😎',           chat: 'ବାପ୍ରେ ବାପ୍! 😎' },
-        { label: '🎯 ସଟ୍!',   phrase: 'ଏକଦମ୍ ସଟ୍! 🎯',           chat: 'ଏକଦମ୍ ସଟ୍! 🎯' },
-      ];
+      // Bar = your 6 most-used reactions + "More" (Odia, village taunts, English)
+      const ODIA_REACTIONS = (typeof Extras !== 'undefined' && Extras.getBarReactions)
+        ? Extras.getBarReactions().map(r => ({ label: r.label, phrase: r.phrase, chat: r.phrase }))
+        : [{ label: '👍 ସହି!', phrase: 'ସହି ବାତ! 👍', chat: 'ସହି ବାତ! 👍' }];
       const reactionBarHtml = seat === mySeat
         ? `<div class="reaction-bar">${ODIA_REACTIONS.map((r,idx) =>
-            `<button class="reaction-btn" data-idx="${idx}">${r.label}</button>`
-          ).join('')}</div>`
+            `<button class="reaction-btn" data-idx="${idx}">${escapeHtml(r.label)}</button>`
+          ).join('')}<button class="reaction-btn reaction-more" data-more="1" aria-label="More reactions">+ More</button></div>`
         : '';
       // Store reactions on element for event binding
       el._odiaReactions = ODIA_REACTIONS;
@@ -738,11 +735,14 @@ const UI = (() => {
       el.querySelectorAll('.reaction-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (btn.dataset.more) {
+            if (typeof Extras !== 'undefined') Extras.openReactionPicker(sendReaction);
+            return;
+          }
           const idx = parseInt(btn.dataset.idx);
           const reaction = el._odiaReactions[idx];
           if (!reaction) return;
-          broadcastEmojiReaction(reaction.phrase);
-          try { Game.sendChat(reaction.chat); } catch(ex) {}
+          sendReaction(reaction.phrase);
         });
       });
 
@@ -906,6 +906,19 @@ const UI = (() => {
     const mySeat = Game.getMySeat();
     const positions = getTrickCardPositions();
 
+    // Which card is winning right now? Glow follows it; a shake marks a takeover.
+    let winningSeat = null;
+    try { winningSeat = Engine.determineTrickWinnerRefined(trick, state.currentRound.trumpSuit); } catch (e) {}
+    const trickKey = `${trick[0].playerIndex}:${trick[0].card.id}`;
+    const now = Date.now();
+    if (glow.key === trickKey && glow.seat !== null && winningSeat !== glow.seat && trick.length > glow.len) {
+      glow.shakeUntil = now + 650;
+    } else if (glow.key !== trickKey) {
+      glow.shakeUntil = 0;
+    }
+    glow.key = trickKey; glow.seat = winningSeat; glow.len = trick.length;
+    const shaking = now < glow.shakeUntil;
+
     trick.forEach(({ playerIndex, card }) => {
       const relIdx = ((playerIndex - mySeat + 6) % 6);
       const pos = positions[relIdx];
@@ -922,7 +935,9 @@ const UI = (() => {
       const playerLabel = playerIndex === mySeat ? 'You' : (player ? player.name : '?');
 
       const el = document.createElement('div');
-      el.className = `trick-card ${card.suit === 'joker' ? 'joker-card' : ''}`;
+      const isWin = playerIndex === winningSeat;
+      el.className = `trick-card ${card.suit === 'joker' ? 'joker-card' : ''} ${isWin ? 'winning' : ''} ${isWin && shaking ? 'overtake' : ''}`;
+      if (isWin) el.dataset.winning = '1';
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
       el.innerHTML = `
         <div class="card-mini" style="color:${color}">
@@ -1292,6 +1307,10 @@ const UI = (() => {
 
     const myTeam = Game.getMyTeam();
     const won = result.scoreChange[myTeam] > 0;
+    if (typeof Sound !== 'undefined') {
+      const made = (result.tricksTaken[result.biddingTeam] || 0) >= result.bid;
+      Sound.host(made ? 'bid_made' : 'bid_broken');
+    }
     let title = won ? 'Round Won!' : 'Round Lost';
     if (result.gs) title = won ? 'GRAND SLAM!' : 'Grand Slam by Opponents!';
     if (result.ls) title = won ? 'LITTLE SLAM!' : 'Little Slam by Opponents!';
@@ -1309,10 +1328,17 @@ const UI = (() => {
         </div>
         <div class="result-actions">
           <button class="wa-btn" id="share-round-btn">Share on WhatsApp</button>
+          <button class="reel-btn" id="reel-round-btn">Recap reel</button>
           <button onclick="document.getElementById('result-overlay').style.display='none'" class="result-dismiss">Continue</button>
         </div>
       </div>
     `;
+    // Snapshot now: the next round may start before the reel button is tapped
+    const reelBtn = document.getElementById('reel-round-btn');
+    let reelSnap = null;
+    try { reelSnap = typeof Reel !== 'undefined' ? Reel.snapshot(result) : null; } catch (e) {}
+    if (!reelSnap || !Reel.pickMime()) reelBtn.style.display = 'none';
+    else reelBtn.onclick = () => Reel.open(result, reelSnap);
     wireShare(document.getElementById('share-round-btn'), {
       won, title, subtitle: `Team ${result.biddingTeam} bid ${result.bid}`, myTeam,
       scores: result.totalScores, delta: result.scoreChange, tricks: result.tricksTaken,
@@ -1333,6 +1359,7 @@ const UI = (() => {
     overlay.style.display = 'flex';
     const myTeam = Game.getMyTeam();
     const won = winner === myTeam;
+    if (typeof Sound !== 'undefined') setTimeout(() => Sound.host(won ? 'game_won' : 'game_lost'), 1200);
 
     overlay.innerHTML = `
       <div class="result-card ${won ? 'won' : 'lost'} game-over">
@@ -1378,6 +1405,13 @@ const UI = (() => {
     setTimeout(() => centerEl.classList.remove('active'), 2000);
   }
 
+  // Send a reaction phrase: animate for everyone, post to chat, remember for the bar
+  function sendReaction(phrase) {
+    broadcastEmojiReaction(phrase);
+    try { Game.sendChat(phrase); } catch (ex) {}
+    if (typeof Extras !== 'undefined' && Extras.noteReactionUsed) Extras.noteReactionUsed(phrase);
+  }
+
   function broadcastEmojiReaction(emoji) {
     if (Game && Game.broadcastEmoji) Game.broadcastEmoji(emoji); // shows locally too
     else showEmojiReaction(emoji, Game.getMySeat());
@@ -1400,6 +1434,152 @@ const UI = (() => {
       badge.textContent = count;
       badge.style.display = 'flex';
     }
+  }
+
+
+  // === TABLE HOST VOICE ===
+  // Watches state changes and announces key moments. The first state seen
+  // (fresh load / rejoin) is only recorded, never announced.
+  const hostSeen = { ready: false, round: null, trump: null, lastTrick: null, cards: new Set(), cut: null, cuts: 0, cutAt: 0 };
+  function hostWatch(state, mySeat) {
+    if (typeof Sound === 'undefined' || !state || !state.currentRound) return;
+    const r = state.currentRound;
+    const roundIdx = (state.roundHistory || []).length;
+    const say = (ev) => { if (hostSeen.ready) Sound.host(ev); };
+    if (hostSeen.round !== roundIdx) {
+      if (hostSeen.round !== null && (state.phase === 'SHUFFLING' || state.phase === 'BIDDING')) say('new_round');
+      hostSeen.round = roundIdx; hostSeen.trump = null; hostSeen.lastTrick = null; hostSeen.cards = new Set(); hostSeen.cuts = 0;
+    }
+    if (r.trumpSuit && hostSeen.trump !== r.trumpSuit && ['PLAYING', 'RAISE_CHECK'].includes(state.phase)) {
+      if (hostSeen.trump === null && r.tricksPlayed === 0 && (r.currentTrick || []).length === 0) say('trump_' + r.trumpSuit);
+      hostSeen.trump = r.trumpSuit;
+    }
+    const trick = r.currentTrick || [];
+    for (const { card } of trick) {
+      if (!card || hostSeen.cards.has(card.id)) continue;
+      hostSeen.cards.add(card.id);
+      if (card.id === 'BIG_JOKER') say('joker_big');
+      else if (card.id === 'SMALL_JOKER') say('joker_small');
+    }
+    // A trump cut: the newest card takes over the trick with trump, beating a non-trump leader
+    if (trick.length >= 2 && r.trumpSuit && r.trumpSuit !== 'notrump') {
+      const key = `${trick[0].card.id}:${trick.length}`;
+      if (hostSeen.cut !== key) {
+        hostSeen.cut = key;
+        try {
+          const before = Engine.determineTrickWinnerRefined(trick.slice(0, -1), r.trumpSuit);
+          const after = Engine.determineTrickWinnerRefined(trick, r.trumpSuit);
+          const newest = trick[trick.length - 1];
+          const prevCard = (trick.find(c => c.playerIndex === before) || {}).card;
+          if (after === newest.playerIndex && before !== after && newest.card.suit === r.trumpSuit &&
+              prevCard && prevCard.suit !== r.trumpSuit && prevCard.suit !== 'joker' && trick[0].card.suit !== r.trumpSuit &&
+              hostSeen.cuts < 2 && Date.now() - hostSeen.cutAt > 20000) { // the host stays a host, not a commentator
+            hostSeen.cuts++; hostSeen.cutAt = Date.now(); say('trumped');
+          }
+        } catch (e) {}
+      }
+    }
+    if (state.phase === 'PLAYING' && r.tricksPlayed === 8 && trick.length === 0 && hostSeen.lastTrick !== roundIdx) {
+      hostSeen.lastTrick = roundIdx; say('last_trick');
+    }
+    hostSeen.ready = true;
+  }
+
+  // === TRICK HISTORY DRAWER ===
+  function cardChip(card, extra) {
+    if (!card) return '';
+    let rank = card.rank, sym = SUIT_SYMBOLS[card.suit] || '';
+    if (card.id === 'BIG_JOKER') rank = 'BIG';
+    if (card.id === 'SMALL_JOKER') rank = 'SM';
+    let color = SUIT_COLORS[card.suit] || '#333';
+    if (card.id === 'BIG_JOKER') color = '#c0392b';
+    if (card.id === 'SMALL_JOKER') color = '#1a1a2e';
+    return `<span class="td-chip ${extra || ''}" style="color:${color}">${rank}<span class="td-chip-suit">${sym}</span></span>`;
+  }
+  function seatName(state, seat, mySeat) {
+    if (seat === mySeat) return 'You';
+    const p = state.players[seat];
+    return escapeHtml(p ? p.name : `Player ${seat + 1}`);
+  }
+  function renderTrickDrawer(state, mySeat) {
+    const r = state && state.currentRound;
+    const tricks = (r && Array.isArray(r.tricks)) ? r.tricks : [];
+    const cnt = document.getElementById('th-count');
+    if (cnt) cnt.textContent = tricks.length;
+    const btn = document.getElementById('trick-history-btn');
+    if (btn && tricks.length === 1) {
+      let seen = false; try { seen = localStorage.getItem('nattis.thHint') === '1'; } catch (e) {}
+      if (!seen) { btn.classList.add('nudge'); try { localStorage.setItem('nattis.thHint', '1'); } catch (e) {} setTimeout(() => btn.classList.remove('nudge'), 4500); }
+    }
+    const drawer = document.getElementById('trick-drawer');
+    if (!drawer || !drawer.classList.contains('open')) return;
+    const list = document.getElementById('td-list');
+    const sub = document.getElementById('td-sub');
+    if (sub) {
+      const trump = r && r.trumpSuit ? (r.trumpSuit === 'notrump' ? 'No trump' : `${SUIT_SYMBOLS[r.trumpSuit] || ''} ${r.trumpSuit}`) : '';
+      sub.textContent = r && r.bid ? `Bid ${r.bid} · Team ${r.biddingTeam}${trump ? ' · ' + trump : ''}` : '';
+    }
+    if (!tricks.length) { list.innerHTML = '<div class="td-empty">No tricks finished yet this round.</div>'; return; }
+    const myTeam = Engine.getTeam(mySeat);
+    const openSet = new Set([...list.querySelectorAll('.td-row.expanded')].map(e => e.dataset.n));
+    list.innerHTML = tricks.map((t, i) => ({ t, i })).reverse().map(({ t, i }) => {
+      const cards = t.cards || [];
+      const lead = cards[0] || {};
+      const win = cards.find(c => c.playerIndex === t.winner) || {};
+      const wTeam = t.winnerTeam || Engine.getTeam(t.winner);
+      const lTeam = Engine.getTeam(lead.playerIndex);
+      const all = cards.map(c => `<span class="td-play ${c.playerIndex === t.winner ? 'won' : ''}">${cardChip(c.card)}<span class="td-play-name team-name-${Engine.getTeam(c.playerIndex).toLowerCase()}">${seatName(state, c.playerIndex, mySeat)}</span></span>`).join('');
+      const n = String(i + 1);
+      return `<div class="td-row ${wTeam === myTeam ? 'ours' : 'theirs'} ${openSet.has(n) ? 'expanded' : ''}" data-n="${n}" role="button" tabindex="0" aria-expanded="${openSet.has(n)}">
+        <span class="td-n">${n}</span>
+        <span class="td-cell"><small>Led</small><b class="team-name-${lTeam.toLowerCase()}">${seatName(state, lead.playerIndex, mySeat)}</b>${cardChip(lead.card, 'sm')}</span>
+        <span class="td-cell"><small>Won</small><b class="team-name-${wTeam.toLowerCase()}">${seatName(state, t.winner, mySeat)}</b></span>
+        <span class="td-cell td-wc"><small>With</small>${cardChip(win.card, 'win')}</span>
+        <div class="td-all">${all}</div>
+      </div>`;
+    }).join('');
+  }
+  function openTrickDrawer() {
+    const d = document.getElementById('trick-drawer');
+    if (!d) return;
+    d.classList.add('open'); d.setAttribute('aria-hidden', 'false');
+    if (lastRender) renderTrickDrawer(lastRender.state, lastRender.mySeat);
+  }
+  function closeTrickDrawer() {
+    const d = document.getElementById('trick-drawer');
+    if (!d) return;
+    d.classList.remove('open'); d.setAttribute('aria-hidden', 'true');
+  }
+  function wireTrickDrawer() {
+    const d = document.getElementById('trick-drawer');
+    if (!d) return;
+    const btn = document.getElementById('trick-history-btn');
+    if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); d.classList.contains('open') ? closeTrickDrawer() : openTrickDrawer(); });
+    d.querySelector('.td-backdrop').addEventListener('click', closeTrickDrawer);
+    d.querySelector('.td-close').addEventListener('click', closeTrickDrawer);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && d.classList.contains('open')) closeTrickDrawer(); });
+    const list = document.getElementById('td-list');
+    const toggle = (row) => { row.classList.toggle('expanded'); row.setAttribute('aria-expanded', row.classList.contains('expanded')); };
+    list.addEventListener('click', (e) => { const row = e.target.closest('.td-row'); if (row) toggle(row); });
+    list.addEventListener('keydown', (e) => { const row = e.target.closest('.td-row'); if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(row); } });
+    // Swipe up anywhere on the table opens it; swipe down on the sheet closes it
+    const swipe = (el, dir, fn, guard) => {
+      let s = null;
+      el.addEventListener('touchstart', (e) => { if (e.touches.length !== 1 || (guard && !guard(e))) { s = null; return; } s = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }; }, { passive: true });
+      el.addEventListener('touchend', (e) => {
+        if (!s) return; const t = e.changedTouches[0];
+        const dy = (s.y - t.clientY) * dir, dx = Math.abs(t.clientX - s.x);
+        if (dy > 50 && dx < dy * 0.7 && Date.now() - s.t < 800) fn();
+        s = null;
+      }, { passive: true });
+    };
+    const table = document.querySelector('#game-screen .game-table');
+    if (table) swipe(table, 1, () => {
+      const st = lastRender && lastRender.state;
+      if (st && ['PLAYING', 'RAISE_CHECK', 'ROUND_END'].includes(st.phase)) openTrickDrawer();
+    });
+    const sheet = d.querySelector('.td-sheet');
+    swipe(sheet, -1, closeTrickDrawer, () => list.scrollTop <= 0);
   }
 
   // === TOAST ===

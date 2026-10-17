@@ -31,7 +31,7 @@
   <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./style.css?v=17">
+  <link rel="stylesheet" href="./style.css?v=20">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -105,7 +105,7 @@
         <button id="join-btn" class="btn btn-secondary">Join a Game</button>
         <button id="rejoin-btn" class="btn btn-primary" style="display:none">Rejoin game</button>
         <button id="rules-btn" class="btn btn-ghost">View Rules</button>
-        <button id="title-theme-btn" class="btn btn-ghost">Themes &amp; Cards</button>
+        <button id="title-theme-btn" class="btn btn-ghost">Table, Speed &amp; Bots</button>
       </div>
     </div>
   </div>
@@ -176,6 +176,7 @@
     <div id="hud-strip">
       <div id="game-info"></div>
       <div id="bid-progress" aria-live="polite"></div>
+      <button id="trick-history-btn" class="th-btn" type="button" title="Past tricks (or swipe up on the table)" aria-label="Past tricks"><span class="th-ico" aria-hidden="true">&#9650;</span><span id="th-count">0</span></button>
     </div>
 
     <!-- Table Area -->
@@ -186,6 +187,19 @@
       <div id="current-trick"></div>
       <div id="round-history"></div>
       <div id="fx-layer"></div>
+    </div>
+
+    <!-- Trick history drawer -->
+    <div id="trick-drawer" class="trick-drawer" aria-hidden="true">
+      <div class="td-backdrop"></div>
+      <div class="td-sheet" role="dialog" aria-label="Past tricks">
+        <div class="td-grip" aria-hidden="true"></div>
+        <div class="td-head">
+          <div><div class="td-title">Past tricks</div><div class="td-sub" id="td-sub"></div></div>
+          <button class="td-close" type="button" aria-label="Close">&#10005;</button>
+        </div>
+        <div class="td-list" id="td-list"></div>
+      </div>
     </div>
 
     <!-- Action Panels -->
@@ -240,11 +254,35 @@
   <!-- Theme Overlay -->
   <div id="theme-overlay">
     <div class="theme-card">
-      <div class="theme-head"><h2>Themes</h2><button class="theme-close" id="theme-close" aria-label="Close">&times;</button></div>
+      <div class="theme-head"><h2>Table &amp; bots</h2><button class="theme-close" id="theme-close" aria-label="Close">&times;</button></div>
+      <h3>Sound</h3>
+      <div class="seg-group" id="sfx-options"></div>
+      <h3>Table host voice</h3>
+      <div class="seg-group" id="host-options"></div>
+      <p class="theme-note">Announces trump, jokers, the last trick and whether the bid was made.</p>
       <h3>Table</h3>
       <div class="theme-grid" id="theme-table-options"></div>
       <h3>Cards</h3>
       <div class="theme-grid" id="theme-deck-options"></div>
+      <h3>Bot speed</h3>
+      <div class="seg-group" id="speed-options"></div>
+      <p class="theme-note">How long each bot takes to play a card. In online games the host's setting is used.</p>
+      <h3>Bot names</h3>
+      <div class="seg-group" id="botname-options"></div>
+      <div class="friend-names" id="friend-names"></div>
+      <p class="theme-note">Bots are renamed right away. Empty boxes get a hostel nickname.</p>
+      <h3>Bot table talk</h3>
+      <div class="seg-group" id="talk-options"></div>
+      <p class="theme-note">Bots react in character: ଜୋକର slams, getting trumped, a made or broken bid.</p>
+    </div>
+  </div>
+
+  <!-- Reaction picker -->
+  <div id="react-overlay" class="react-overlay" aria-hidden="true">
+    <div class="rp-sheet" role="dialog" aria-label="Reactions">
+      <div class="rp-head"><span class="rp-title">Say something</span><button class="rp-close" type="button" aria-label="Close">&#10005;</button></div>
+      <div class="rp-tabs"></div>
+      <div class="rp-grid"></div>
     </div>
   </div>
 
@@ -335,11 +373,13 @@
   <script src="./crypto.js?v=14"></script>
   <script src="./engine.js?v=14"></script>
   <script src="./network.js?v=14"></script>
-  <script src="./ui.js?v=17"></script>
+  <script src="./ui.js?v=20"></script>
   <script src="./badges.js?v=14"></script>
   <script src="./fx.js?v=14"></script>
-  <script src="./extras.js?v=17"></script>
-  <script src="./game.js?v=17"></script>
+  <script src="./sound.js?v=20"></script>
+  <script src="./extras.js?v=20"></script>
+  <script src="./reel.js?v=20"></script>
+  <script src="./game.js?v=20"></script>
   <script>
     // Service Worker registration
     if ('serviceWorker' in navigator) {
