@@ -1,5 +1,5 @@
-// Service Worker for Trump Call PWA
-const CACHE_NAME = 'trump-call-v31';
+// Service Worker for Nattis PWA
+const CACHE_NAME = 'nattis-v32';
 const ASSETS = [
   './',
   './index.html',

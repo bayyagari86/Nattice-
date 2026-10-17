@@ -1,6 +1,6 @@
 # Deployment guide
 
-Nattice runs entirely on free-tier infrastructure. Total cost: **$0/month**.
+Nattis runs entirely on free-tier infrastructure. Total cost: **$0/month**.
 
 ## Architecture
 

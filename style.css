@@ -1,5 +1,5 @@
 /* ============================================================
-   TRUMP CALL — Next-Gen Mobile-First Styles v14
+   NATTIS — Next-Gen Mobile-First Styles v14
    ============================================================ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap');
@@ -436,7 +436,7 @@ html, body {
   overflow: hidden;
 }
 
-/* Nattice inline wordmark inside topbar */
+/* Nattis inline wordmark inside topbar */
 .nattice-wordmark {
   display: flex;
   align-items: center;
@@ -1652,4 +1652,17 @@ body.compact-land .table-center-circle { display: none; }
 body.compact-land #game-info {
   top: auto; bottom: 6px; left: 8px; transform: none;
   font-size: 10px; padding: 4px 10px; max-width: 24vw;
+}
+
+/* Narrow phones (portrait): logo-only brand, short team labels, roomier HUD */
+@media (max-width: 640px) {
+  body:not(.compact-land) .game-topbar { padding: 6px 8px; gap: 6px; }
+  body:not(.compact-land) .lbl-team { display: none; }
+  body:not(.compact-land) .score-team { padding: 3px 9px; min-width: 0; }
+  body:not(.compact-land) .score-team span:first-child { font-size: 9px; }
+  body:not(.compact-land) .score-team .score-value { font-size: 20px; }
+  body:not(.compact-land) .score-team .tricks-value { font-size: 9px; }
+  body:not(.compact-land) .badges-toggle-btn { padding: 4px 8px; }
+  body:not(.compact-land) #trump-info { font-size: 12px; white-space: nowrap; }
+  body:not(.compact-land) .trump-suit { font-size: 13px; }
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Trump Call — Card Game",
-  "short_name": "Trump Call",
+  "name": "Nattis — Card Game",
+  "short_name": "Nattis",
   "description": "Encrypted 6-player card game with real-time multiplayer",
   "start_url": "./index.html",
   "scope": "./",

@@ -581,8 +581,8 @@ const UI = (() => {
     const oppTeam = myTeam === 'A' ? 'B' : 'A';
     document.getElementById('my-team-score').textContent = state.scores[myTeam];
     document.getElementById('opp-team-score').textContent = state.scores[oppTeam];
-    document.getElementById('my-team-label').textContent = `Team ${myTeam} (You)`;
-    document.getElementById('opp-team-label').textContent = `Team ${oppTeam}`;
+    document.getElementById('my-team-label').innerHTML = `<span class="lbl-team">Team </span>${myTeam} (You)`;
+    document.getElementById('opp-team-label').innerHTML = `<span class="lbl-team">Team </span>${oppTeam}`;
 
     // Tricks taken this round
     const round = state.currentRound;
@@ -593,7 +593,7 @@ const UI = (() => {
     const bidInfo = document.getElementById('bid-info');
     if (round.bid > 0) {
       const bidder = state.players[round.bidder];
-      bidInfo.textContent = `Bid ${round.bid} · ${bidder ? bidder.name : '?'} · Team ${round.biddingTeam}`;
+      bidInfo.textContent = `Bid ${round.bid} · ${bidder ? bidder.name : '?'} (${round.biddingTeam})`;
     } else if (state.phase === 'BIDDING') {
       const currentBidder = state.players[round.currentBidder];
       bidInfo.textContent = currentBidder ? `${currentBidder.name} bidding…` : 'Bidding…';
@@ -687,7 +687,7 @@ const UI = (() => {
         <div class="reaction-float" id="reaction-float-${seat}"></div>
         <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
         <div class="player-name">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
-        <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}</div>
+        <div class="player-meta">Team ${team}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}</div>
         ${reactionBarHtml}
         ${cardBacksHtml}
       `;

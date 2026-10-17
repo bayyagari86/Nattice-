@@ -1,4 +1,4 @@
-# Nattice Load Testing Guide
+# Nattis Load Testing Guide
 
 ## Quick Start
 

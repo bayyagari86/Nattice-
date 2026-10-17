@@ -1,5 +1,5 @@
 // ============================================================
-// GAME ENGINE — Trump Call Card Game Rules & Logic
+// GAME ENGINE — Nattis Card Game Rules & Logic
 // ============================================================
 //
 // Rules Summary:

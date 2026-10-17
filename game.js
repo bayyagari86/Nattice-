@@ -1812,8 +1812,11 @@ const Game = (() => {
     if (!['spades', 'hearts', 'diamonds', 'clubs'].includes(suit)) suit = 'spades';
     state.currentRound.trumpSuit = suit;
     state.phase = 'PLAYING';
-    state.currentRound.trickLeader = state.currentRound.bidder;
-    state.currentRound.currentPlayer = state.currentRound.bidder;
+    // The dealer (who shuffled) leads the first trick, not the highest bidder.
+    // The dealer rotates round-robin each round, so the opening lead rotates too.
+    const leader = ((state.dealer % 6) + 6) % 6;
+    state.currentRound.trickLeader = leader;
+    state.currentRound.currentPlayer = leader;
     state.currentRound.currentTrick = [];
 
     // Track trump calls for badges

@@ -19,7 +19,7 @@
 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Trump Call — Encrypted Card Game</title>
+  <title>Nattis — Encrypted Card Game</title>
   <meta name="description"
     content="A multiplayer encrypted card game with WebRTC P2P networking and AES-256-GCM encryption.">
 
@@ -28,7 +28,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Trump Call">
+  <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
   <link rel="stylesheet" href="./style.css?v=15">
@@ -79,8 +79,8 @@
     <div class="title-content">
       <div class="title-logo">
         <div class="nattice-title-badge">N</div>
-        <h1>Nattice</h1>
-        <p>Trump Call &middot; 6-Player Encrypted Card Game</p>
+        <h1>Nattis</h1>
+        <p>6-Player Encrypted Card Game</p>
       </div>
 
       <div class="encrypted-badge">
@@ -141,9 +141,8 @@
   <div id="game-screen" class="screen">
     <!-- Top Bar -->
     <div class="game-topbar">
-      <div class="nattice-wordmark">
+      <div class="nattice-wordmark" title="Nattis" aria-label="Nattis">
         <span class="nattice-logo">N</span>
-        <span class="nattice-name">Nattice</span>
       </div>
       <button id="badges-toggle" class="badges-toggle-btn" title="Badges & Points">
         <span class="badges-icon">🏆</span>
@@ -231,7 +230,7 @@
   <!-- Rules Overlay -->
   <div id="rules-overlay">
     <div class="rules-card">
-      <h2>Trump Call Rules</h2>
+      <h2>Nattis Rules</h2>
       <h3>Overview</h3>
       <p>6 players, 2 teams of 3 (seated alternately). 54-card deck (52 + Big Joker + Small Joker). 9 cards each, 9
         tricks per round.</p>
@@ -254,6 +253,9 @@
 
       <h3>Playing</h3>
       <ul>
+        <li>The dealer (who shuffled) leads the first trick &mdash; not the highest bidder</li>
+        <li>The deal rotates one seat each round, so the opening lead rotates too</li>
+        <li>The winner of each trick leads the next one</li>
         <li>Cannot start a trick with a Joker</li>
         <li>Must follow the lead suit if you can</li>
         <li>Jokers can be played anytime, even if you have the lead suit</li>
