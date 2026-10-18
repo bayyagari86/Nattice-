@@ -256,6 +256,12 @@ const Extras = (() => {
   const DEFAULT_SPEED = 'fast';
   function getSpeedPref() { const v = lsGet(LS_SPEED, DEFAULT_SPEED); return SPEEDS[v] ? v : DEFAULT_SPEED; }
   function getBotDelayMs() { return SPEEDS[getSpeedPref()].ms; }
+  // Raise discussion time after 5 tricks (host's setting drives online games)
+  const LS_RAISE = 'nattis.raiseSecs';
+  const RAISE_TIMES = { '10': 'Quick', '20': 'Default', '30': 'Relaxed', '45': 'Long' };
+  const DEFAULT_RAISE = '20';
+  function getRaisePref() { const v = lsGet(LS_RAISE, DEFAULT_RAISE); return RAISE_TIMES[v] ? v : DEFAULT_RAISE; }
+  function getRaiseSecs() { return +getRaisePref(); }
   function getNameMode() { const v = lsGet(LS_NAMES, 'hostel'); return NAME_MODES[v] ? v : 'hostel'; }
   function getFriendNames() {
     try { const a = JSON.parse(lsGet(LS_FRIENDS, '[]')); return Array.isArray(a) ? a.map(s => String(s || '').trim().slice(0, 14)) : []; } catch (_) { return []; }
@@ -288,6 +294,10 @@ const Extras = (() => {
     const spEl = document.getElementById('speed-options');
     if (spEl) spEl.innerHTML = Object.entries(SPEEDS).map(([k, s]) =>
       `<button class="seg-opt ${sp === k ? 'selected' : ''}" data-speed="${k}"><b>${s.label}</b><small>${s.sub}</small></button>`).join('');
+    const rs = getRaisePref();
+    const rsEl = document.getElementById('raise-options');
+    if (rsEl) rsEl.innerHTML = Object.entries(RAISE_TIMES).map(([k, l]) =>
+      `<button class="seg-opt ${rs === k ? 'selected' : ''}" data-raise="${k}"><b>${k} sec</b><small>${l}</small></button>`).join('');
     const nm = getNameMode();
     const nmEl = document.getElementById('botname-options');
     if (nmEl) nmEl.innerHTML = Object.entries(NAME_MODES).map(([k, s]) =>
@@ -320,6 +330,7 @@ const Extras = (() => {
       seg('talk-options', [['on', 'On', 'Bots chatter'], ['off', 'Off', 'Quiet bots']], Sound.getTalk(), Sound.setTalk);
     }
     document.querySelectorAll('#speed-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_SPEED, b.dataset.speed); renderSettings(); });
+    document.querySelectorAll('#raise-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_RAISE, b.dataset.raise); renderSettings(); });
     document.querySelectorAll('#botname-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_NAMES, b.dataset.names); renderSettings(); renameBotsNow(); });
   }
 
@@ -669,7 +680,7 @@ const Extras = (() => {
 
   return {
     init, applyTheme, activeTheme, festivalToday, themeColors: k => (TABLE_THEMES[k] && TABLE_THEMES[k].bg) || TABLE_THEMES.classic.bg, FESTIVALS, TABLE_THEMES, greetIfFestival, openThemePicker, updateLight, gameProgress,
-    getBotDelayMs, getBotNames, getNameMode, getBarReactions, noteReactionUsed, openReactionPicker, closeReactionPicker,
+    getBotDelayMs, getRaiseSecs, getBotNames, getNameMode, getBarReactions, noteReactionUsed, openReactionPicker, closeReactionPicker,
     REACTIONS, findReaction, ALL_REACTIONS,
     showReaction, shareScorecard, drawScorecard, inviteOnWhatsApp,
   };

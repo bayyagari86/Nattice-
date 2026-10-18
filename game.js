@@ -1330,6 +1330,7 @@ const Game = (() => {
         adoptHostSnapshot(fromPeer, msg);
         break;
       case 'STATE_UPDATE':
+        if (typeof msg.hostNow === 'number' && isFinite(msg.hostNow)) clockOffsetMs = msg.hostNow - Date.now();
         if (applyState(msg.state, { term: typeof msg._t === 'number' ? msg._t : hostTerm })) {
           saveSession();
           renderForPhase();
@@ -2028,7 +2029,9 @@ const Game = (() => {
             state.phase = 'RAISE_CHECK';
             state.currentRound.currentTrick = [];
             state.currentRound.raiseCommitments = {};
-            state.currentRound.raiseTimer = 20; // 20 seconds
+            state.currentRound.raiseTimer = (() => {             // chosen in settings, default 20 seconds
+              try { return (typeof Extras !== 'undefined' && Extras.getRaiseSecs) ? Extras.getRaiseSecs() : 20; } catch (_) { return 20; }
+            })();
             broadcastState();
             if (!isSoloMode) bcast({ type: 'RAISE_PROMPT' });
             UI.updateAll(state, mySeat);
@@ -3122,10 +3125,15 @@ const Game = (() => {
     return clean;
   }
 
+  // Countdowns use the host's clock: each update carries the host's "now",
+  // so a phone whose clock runs fast or slow still shows the full time.
+  let clockOffsetMs = 0;
+  function hostNow() { return Date.now() + ((isSoloMode || (typeof Network !== 'undefined' && Network.getIsHost())) ? 0 : clockOffsetMs); }
+
   function broadcastState() {
     if (isSoloMode || !state) return;
     state.version = (state.version || 0) + 1;
-    bcast({ type: 'STATE_UPDATE', state: sanitizeStateForClient(state) });
+    bcast({ type: 'STATE_UPDATE', state: sanitizeStateForClient(state), hostNow: Date.now() });
     saveSession();
   }
 
@@ -3195,7 +3203,7 @@ const Game = (() => {
 
   return {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
-    getState, getMySeat, getMyTeam,
+    getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
     raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji,
     stopAINameRotation, applyBotNames,

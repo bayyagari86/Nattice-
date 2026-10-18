@@ -4,6 +4,8 @@
 
 const UI = (() => {
   // Card rendering
+  // Time on the host's clock (falls back to this device's clock)
+  const nowHost = () => { try { return (typeof Game !== 'undefined' && Game.hostNow) ? Game.hostNow() : Date.now(); } catch (_) { return Date.now(); } };
   const SUIT_SYMBOLS = {
     spades: '\u2660', hearts: '\u2665', diamonds: '\u2666', clubs: '\u2663', notrump: '\u2668', joker: '\u2605'
   };
@@ -1084,7 +1086,7 @@ const UI = (() => {
     const baseText = infoEl.textContent;
 
     const tick = () => {
-      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const secs = Math.max(0, Math.ceil((deadline - nowHost()) / 1000));
       if (!document.body.contains(infoEl)) {
         clearInterval(turnCountdownInterval); turnCountdownInterval = null; return;
       }
@@ -1254,8 +1256,8 @@ const UI = (() => {
     
     const potentialTotal = tricksWon + totalCommitted;
     // Prefer live deadline; fall back to static timer for backwards compat
-    const deadline = state.currentRound.raiseDeadline || (Date.now() + (state.currentRound.raiseTimer || 20) * 1000);
-    const initialSecs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    const deadline = state.currentRound.raiseDeadline || (nowHost() + (state.currentRound.raiseTimer || 20) * 1000);
+    const initialSecs = Math.max(0, Math.ceil((deadline - nowHost()) / 1000));
     
     panel.innerHTML = `
       <div class="bid-title">Raise Discussion (<span id="raise-countdown">${initialSecs}</span>s)</div>
@@ -1281,7 +1283,7 @@ const UI = (() => {
     raiseCountdownInterval = setInterval(() => {
       const el = document.getElementById('raise-countdown');
       if (!el) { clearInterval(raiseCountdownInterval); raiseCountdownInterval = null; return; }
-      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const secs = Math.max(0, Math.ceil((deadline - nowHost()) / 1000));
       el.textContent = String(secs);
       if (secs <= 5) el.style.color = '#ff6b6b';
       if (secs <= 0) { clearInterval(raiseCountdownInterval); raiseCountdownInterval = null; }
