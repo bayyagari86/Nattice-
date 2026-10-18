@@ -2298,3 +2298,13 @@ body[data-art].compact-land .table-player .player-cards-count { color: rgba(255,
   opacity: 0; transition: opacity .9s ease; }
 #theme-deco .scene-video.on { opacity: 1; }
 @media (orientation: landscape) { #theme-deco .scene-video { display: none; } }
+
+/* Raise discussion: live commitments and goals */
+#raise-commits { display: flex; flex-direction: column; gap: 4px; min-width: 220px; margin: 6px 0; }
+#raise-commits .commitment-item { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+#raise-commits .commitment-item.pending { opacity: .55; }
+#raise-commits .commitment-total { margin-top: 4px; font-weight: 700; color: #fde68a; font-size: 13px; text-align: center; }
+#raise-buttons .bid-btn.suggested { border-color: #fbbf24; box-shadow: 0 0 0 2px rgba(251,191,36,.55); color: #fde68a; }
+.goal-chip { display: inline-block; margin-left: 3px; padding: 0 5px; border-radius: 8px; font-size: .92em; font-weight: 700;
+  background: rgba(251,191,36,.18); color: #fde68a; border: 1px solid rgba(251,191,36,.5); white-space: nowrap; }
+.goal-chip.done { background: rgba(74,222,128,.18); color: #bbf7d0; border-color: rgba(74,222,128,.55); }

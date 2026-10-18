@@ -2038,8 +2038,8 @@ const Game = (() => {
             if (Engine.getTeam(mySeat) === biddingTeam) {
               UI.showRaisePrompt(state);
             }
-            // AI teammates share what they can still win
-            if (isSoloMode) setTimeout(() => aiSuggestRaiseCommitment(), d(1000));
+            // Bot partners share what they can take for certain
+            aiSuggestRaiseCommitment();
             // A bot bidder decides itself — after a pause if a human partner may commit
             const bidderSeat = state.currentRound.bidder;
             if (state.players[bidderSeat] && state.players[bidderSeat].isAI) {
@@ -2092,6 +2092,7 @@ const Game = (() => {
     state.currentRound.raiseCommitments[seat] = Math.max(0, Math.min(4, Number(msg.tricks) || 0));
     broadcastState();
     UI.updateAll(state, mySeat);
+    aiBidderRethink();
   }
 
   function handleExtendTimer(fromPeer, msg) {
@@ -2135,9 +2136,11 @@ const Game = (() => {
 
   function commitRaiseTricks(tricks) {
     if (isSoloMode || Network.getIsHost()) {
-      state.currentRound.raiseCommitments[mySeat] = tricks;
+      if (state.phase !== 'RAISE_CHECK') return;
+      state.currentRound.raiseCommitments[mySeat] = Math.max(0, Math.min(4, Number(tricks) || 0));
       broadcastState();
       UI.updateAll(state, mySeat);
+      aiBidderRethink();
     } else {
       sendToHost({ type: 'RAISE_COMMIT', tricks });
     }
@@ -2196,7 +2199,12 @@ const Game = (() => {
     if (newBid > state.currentRound.bid && newBid <= 9) {
       state.currentRound.bid = newBid;
       state.currentRound.raised = true;
-      UI.showToast(`Bid raised to ${newBid}!`);
+      // Committed tricks become each player's goal for the rest of the round
+      const goals = {};
+      for (const [st, n] of Object.entries(state.currentRound.raiseCommitments || {})) if (+n > 0) goals[st] = +n;
+      state.currentRound.raiseGoals = goals;
+      state.currentRound.raiseAtTrick = state.currentRound.tricksPlayed;
+      UI.showToast(`Bid raised to ${newBid}${newBid === 8 ? ' (LS)' : newBid === 9 ? ' (GS)' : ''}!`);
     }
     resumeAfterRaise();
   }
@@ -2907,49 +2915,68 @@ const Game = (() => {
   }
 
   // AI teammates suggest how many tricks they can win during raise discussion
-  function aiSuggestRaiseCommitment() {
-    const biddingTeam = state.currentRound.biddingTeam;
-    const aiSeats = [1, 2, 3, 4, 5].filter(s => 
-      state.players[s]?.isAI && Engine.getTeam(s) === biddingTeam
-    );
-
-    for (const seat of aiSeats) {
-      const hand = state.hands[seat];
-      if (!hand || hand.length === 0) continue;
-
-      const trump = state.currentRound.trumpSuit;
-      const eval_ = aiEvalHand(hand);
-      
-      // Estimate additional tricks AI can win
-      let canWin = 0;
-      const hasBigJoker = hand.some(c => c.id === 'BIG_JOKER');
-      const hasSmallJoker = hand.some(c => c.id === 'SMALL_JOKER');
-      const trumpCards = hand.filter(c => c.suit === trump);
-      const highTrump = trumpCards.filter(c => Engine.RANK_VALUES[c.rank] >= 11); // A or K
-      
-      if (hasBigJoker) canWin++;
-      if (hasSmallJoker && !aiMemory.opponentTrumpA[trump]) canWin++;
-      canWin += Math.min(highTrump.length, 2);
-      
-      // Cap at remaining tricks
-      const remaining = 4; // 9 total - 5 played
-      canWin = Math.min(canWin, remaining);
-
-      if (canWin > 0) {
-        state.currentRound.raiseCommitments[seat] = canWin;
-        const playerName = state.players[seat].name;
-        const msg = canWin === 1 ? `I can take 1 more 💪` : `I can win ${canWin} more 🔥`;
-        setTimeout(() => {
-          UI.addChatMessage(playerName, msg);
-        }, 500 + seat * 300);
+  // Tricks a hand can take "without issue": the Big Joker, trumps nobody can
+  // beat (an unseen Big Joker can still take one), every trump once the
+  // others are out of trumps, and the Small Joker when no trump or Big Joker
+  // is left to beat it. Only what has been played is used — no peeking.
+  function aiSureTricks(seat) {
+    const r = state.currentRound;
+    const hand = state.hands[seat] || [];
+    const trump = r.trumpSuit;
+    const played = aiSeen();
+    const remaining = 9 - r.tricksPlayed;
+    const hasBig = hand.some(c => c.id === 'BIG_JOKER');
+    const bigGoneOrMine = hasBig || played.has('BIG_JOKER');
+    const why = [];
+    let sure = 0;
+    if (hasBig) { sure++; why.push('Big Joker'); }
+    let othersHaveTrump = true;
+    if (trump && trump !== 'notrump') {
+      const myT = hand.filter(c => c.suit === trump);
+      const out = 13 - Engine.RANKS.filter(rk => played.has(`${rk}_${trump}`)).length - myT.length;
+      othersHaveTrump = out > 0;
+      if (!othersHaveTrump && myT.length) { sure += myT.length; why.push(`${myT.length} trump${myT.length > 1 ? 's' : ''} (no one else has any)`); }
+      else {
+        let masters = myT.filter(c => aiHigherTrumpsOut(trump, c.rank, hand, played) === 0).length;
+        if (masters && !bigGoneOrMine) masters--;
+        if (masters > 0) { sure += masters; why.push(`top trump${masters > 1 ? 's' : ''}`); }
       }
-    }
+    } else othersHaveTrump = false;
+    if (hand.some(c => c.id === 'SMALL_JOKER') && bigGoneOrMine && !othersHaveTrump && !hasBig) { sure++; why.push('Small Joker'); }
+    return { n: Math.min(sure, remaining), why };
+  }
 
-    // Update UI after all AI commitments
+  // Bot partners on the bidding team say how many more tricks they can take
+  // for certain. These become their goals if the bid is raised.
+  function aiSuggestRaiseCommitment() {
+    const r = state.currentRound;
+    const aiSeats = [0, 1, 2, 3, 4, 5].filter(s =>
+      s !== r.bidder && state.players[s]?.isAI && Engine.getTeam(s) === r.biddingTeam);
+    aiSeats.forEach((seat, i) => {
+      const { n, why } = aiSureTricks(seat);
+      r.raiseCommitments[seat] = n;
+      const msg = n > 0 ? `I can take ${n} more for sure (${why.join(', ')})` : 'Nothing certain from me';
+      setTimeout(() => {
+        UI.addChatMessage(state.players[seat].name, msg);
+        if (!isSoloMode) bcast({ type: 'CHAT', name: state.players[seat].name, text: msg });
+      }, d(400 + i * 500));
+    });
+    broadcastState();
+    UI.updateAll(state, mySeat);
+  }
+
+  // A bot bidder re-decides when a partner commits
+  function aiBidderRethink() {
+    const r = state && state.currentRound;
+    if (!r || state.phase !== 'RAISE_CHECK') return;
+    if (!isSoloMode && !Network.getIsHost()) return;
+    const bs = r.bidder;
+    if (!state.players[bs] || !state.players[bs].isAI) return;
+    const key = r.tricks.length;
     setTimeout(() => {
-      broadcastState();
-      UI.updateAll(state, mySeat);
-    }, 2000);
+      if (!state || state.phase !== 'RAISE_CHECK' || state.currentRound.tricks.length !== key) return;
+      aiHandleRaise(bs);
+    }, d(1500));
   }
 
   function getLowest(cards, trump) {
@@ -2964,26 +2991,24 @@ const Game = (() => {
 
   function aiHandleRaise(seat) {
     const r = state.currentRound;
+    if (state.phase !== 'RAISE_CHECK') return;
     if (Engine.getTeam(seat) !== r.biddingTeam || seat !== r.bidder) { processNoRaise(); return; }
     const tricks = r.tricksTaken[r.biddingTeam];
     const remaining = 9 - r.tricksPlayed;
-    // A slam bonus now needs a declared LS/GS, and a failed raise hands the
-    // opponents double. So a bot raises only when the tricks still needed are
-    // covered by its own certain winners plus most of its partners' commitments.
-    const hand = state.hands[seat] || [];
-    const trump = r.trumpSuit;
-    const played = aiSeen();
-    let sure = hand.some(c => c.id === 'BIG_JOKER') ? 1 : 0;
-    if (trump && trump !== 'notrump') {
-      let masters = hand.filter(c => c.suit === trump && aiHigherTrumpsOut(trump, c.rank, hand, played) === 0).length;
-      if (masters && !played.has('BIG_JOKER') && !sure) masters--; // the unseen Big Joker can take one
-      sure += masters;
-    }
+    // A slam bonus needs a declared LS/GS, and a failed raise hands the
+    // opponents double. Raise only when certain tricks — the bidder's own plus
+    // what partners committed — reach the slam.
+    const own = aiSureTricks(seat).n;
     const others = Object.entries(r.raiseCommitments || {})
       .filter(([s]) => +s !== seat).reduce((a, [, n]) => a + (+n || 0), 0);
-    const likely = Math.min(remaining, sure + Math.floor(others * 0.6));
-    if (tricks === 5 && r.bid < 9 && sure >= remaining) { processRaise(9); return; }      // GS
-    if (r.bid < 8 && tricks + likely >= 8 && sure >= Math.max(1, 8 - tricks - 1)) { processRaise(8); return; } // LS
+    r.raiseCommitments[seat] = own;
+    const total = Math.min(remaining, own + others);
+    if (tricks === 5 && r.bid < 9 && total >= remaining) { processRaise(9); return; }   // GS
+    if (r.bid < 8 && tricks + total >= 8) { processRaise(8); return; }                  // LS
+    // Wait for a human partner who hasn't committed yet; the timer still applies
+    const humanPending = state.players.some((pl, i) => pl && !pl.isAI && i !== seat &&
+      Engine.getTeam(i) === r.biddingTeam && !(String(i) in (r.raiseCommitments || {})));
+    if (humanPending && !r._botWaited) { r._botWaited = true; return; }
     processNoRaise();
   }
 

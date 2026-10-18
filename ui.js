@@ -736,7 +736,7 @@ const UI = (() => {
         <div class="reaction-float" id="reaction-float-${seat}"></div>
         <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
         <div class="player-name team-name-${team.toLowerCase()}">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
-        <div class="player-meta">${seat !== mySeat && team === Engine.getTeam(mySeat) ? '<span class="partner-tag">Partner</span>' : `Team ${team}`}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}</div>
+        <div class="player-meta">${seat !== mySeat && team === Engine.getTeam(mySeat) ? '<span class="partner-tag">Partner</span>' : `Team ${team}`}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}${goalChip(state, seat)}</div>
         ${reactionBarHtml}
         ${cardBacksHtml}
       `;
@@ -1232,6 +1232,49 @@ const UI = (() => {
       return;
     }
     panel.style.display = 'flex';
+    refreshRaiseCommitments(state);
+  }
+
+  // After a raise, each player's committed tricks show as a goal on their seat
+  function goalChip(state, seat) {
+    const r = state.currentRound;
+    const n = r && r.raiseGoals ? +r.raiseGoals[seat] || 0 : 0;
+    if (!n || !['PLAYING', 'ROUND_END'].includes(state.phase)) return '';
+    const from = r.raiseAtTrick || 5;
+    const got = (r.tricks || []).slice(from).filter(t => t.winner === seat).length;
+    return ` <span class="goal-chip${got >= n ? ' done' : ''}">Goal ${Math.min(got, n)}/${n}</span>`;
+  }
+
+  // Live view of who committed what, and the slam the total reaches
+  function refreshRaiseCommitments(state) {
+    const box = document.getElementById('raise-commits');
+    if (!box) return;
+    const r = state.currentRound;
+    const won = r.tricksTaken[r.biddingTeam] || 0;
+    const commits = r.raiseCommitments || {};
+    const me = Game.getMySeat();
+    const team = Engine.getTeamPlayers(r.biddingTeam);
+    let total = 0;
+    const rows = team.map(st => {
+      const has = Object.prototype.hasOwnProperty.call(commits, st);
+      const n = has ? (+commits[st] || 0) : 0;
+      total += n;
+      const name = st === me ? 'You' : (state.players[st]?.name || `Player ${st + 1}`);
+      const tag = st === r.bidder ? ' (bidder)' : '';
+      return `<div class="commitment-item${has ? '' : ' pending'}"><span>${escapeHtml(name)}${tag}</span><b>${has ? '+' + n : '…'}</b></div>`;
+    }).join('');
+    const reach = Math.min(9, won + total);
+    const slam = reach >= 9 && won >= 5 ? 'GS (9)' : reach >= 8 ? 'LS (8)' : null;
+    box.innerHTML = `${rows}<div class="commitment-total">Won ${won} + committed ${total} = ${reach}${slam ? ` → ${slam}` : ' — not enough for LS'}</div>`;
+    document.querySelectorAll('#raise-buttons [data-raise]').forEach(btn => {
+      const b = +btn.dataset.raise;
+      btn.classList.toggle('suggested', (b === 8 && reach >= 8 && !(reach >= 9 && won >= 5)) || (b === 9 && reach >= 9 && won >= 5));
+    });
+    const mine = Object.prototype.hasOwnProperty.call(commits, me);
+    const sel = document.getElementById('my-commitment');
+    const cb = document.getElementById('commit-btn');
+    if (cb) cb.textContent = mine ? 'Update' : 'Commit';
+    if (sel && mine && document.activeElement !== sel) sel.value = String(+commits[me] || 0);
   }
 
   function showRaisePrompt(state) {
@@ -1262,9 +1305,9 @@ const UI = (() => {
     panel.innerHTML = `
       <div class="bid-title">Raise Discussion (<span id="raise-countdown">${initialSecs}</span>s)</div>
       <div class="raise-info">Current bid: ${currentBid} | Tricks won: ${tricksWon}</div>
-      ${commitmentsList ? `<div class="commitments-box">${commitmentsList}<div class="commitment-total">Potential: ${potentialTotal} tricks</div></div>` : ''}
+      <div class="commitments-box" id="raise-commits"></div>
       <div class="raise-commitment" id="raise-commitment">
-        <label>I can win:</label>
+        <label>I can surely win:</label>
         <select id="my-commitment">
           <option value="0">0 more</option>
           <option value="1">1 more</option>
@@ -1318,6 +1361,7 @@ const UI = (() => {
         if (Engine.isValidBid(b, currentBid, 'RAISE_CHECK', state)) {
           const btn = document.createElement('button');
           btn.className = 'bid-btn';
+          btn.dataset.raise = String(b);
           btn.textContent = b;
           if (b === 8) btn.textContent = `${b} (LS)`;
           if (b === 9) btn.textContent = `${b} (GS)`;
@@ -1329,6 +1373,7 @@ const UI = (() => {
         }
       }
     }
+    refreshRaiseCommitments(state);
   }
 
   // === RESULTS ===
