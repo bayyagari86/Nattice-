@@ -139,6 +139,7 @@ const UI = (() => {
     // Chat drawer toggle
     document.getElementById('chat-toggle-btn').addEventListener('click', () => {
       document.getElementById('chat-area').classList.add('open');
+      document.querySelectorAll('#chat-bubbles .chat-bubble').forEach(b => b.remove());
       document.getElementById('chat-unread').style.display = 'none';
       document.getElementById('chat-unread').textContent = '0';
       setTimeout(() => document.getElementById('chat-input').focus(), 300);
@@ -700,6 +701,8 @@ const UI = (() => {
       const el = document.createElement('div');
       el.className = `table-player ${isCurrentPlayer ? 'active' : ''} ${seat === mySeat ? 'me' : ''} ${i === 3 ? 'seat-top' : ''} team-${team.toLowerCase()}`;
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
+      el.dataset.seat = seat;
+      if (pos.y < 40) el.classList.add('seat-upper');
 
       // Build card backs HTML for other players
       let cardBacksHtml = '';
@@ -1506,7 +1509,7 @@ const UI = (() => {
   // Send a reaction phrase: animate for everyone, post to chat, remember for the bar
   function sendReaction(phrase) {
     broadcastEmojiReaction(phrase);
-    try { Game.sendChat(phrase); } catch (ex) {}
+    try { Game.sendChat(phrase, { reaction: true }); } catch (ex) {}
     if (typeof Extras !== 'undefined' && Extras.noteReactionUsed) Extras.noteReactionUsed(phrase);
   }
 
@@ -1516,13 +1519,24 @@ const UI = (() => {
   }
 
   // === CHAT ===
-  function addChatMessage(name, text) {
+  function addChatMessage(name, text, seat, opts) {
     const chatEl = document.getElementById('chat-messages');
+    const st = Game.getState && Game.getState();
+    const me = Game.getMySeat && Game.getMySeat();
+    if (!Number.isInteger(seat) && st && st.players) {   // older peers: match by name
+      const k = st.players.findIndex(p => p && p.name === name);
+      if (k >= 0) seat = k;
+    }
+    const isMe = Number.isInteger(seat) && seat === me;
+    const team = Number.isInteger(seat) ? Engine.getTeam(seat) : null;
     const msgEl = document.createElement('div');
-    msgEl.className = 'chat-msg';
-    msgEl.innerHTML = `<strong>${escapeHtml(name)}:</strong> ${escapeHtml(text)}`;
+    msgEl.className = `chat-msg${isMe ? ' mine' : ''}${team ? ' team-' + team.toLowerCase() : ''}`;
+    msgEl.innerHTML = `<strong class="${team ? 'team-name-' + team.toLowerCase() : ''}">${escapeHtml(isMe ? 'You' : name)}:</strong> ${escapeHtml(text)}`;
+    // Stay pinned to the newest message unless the reader has scrolled up
+    const pinned = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 40;
     chatEl.appendChild(msgEl);
-    chatEl.scrollTop = chatEl.scrollHeight;
+    while (chatEl.children.length > 200) chatEl.removeChild(chatEl.firstChild);
+    if (pinned || isMe) chatEl.scrollTop = chatEl.scrollHeight;
 
     // Show unread badge if drawer is closed
     const drawer = document.getElementById('chat-area');
@@ -1532,7 +1546,51 @@ const UI = (() => {
       badge.textContent = count;
       badge.style.display = 'flex';
     }
+    if (!(opts && opts.reaction) && Number.isInteger(seat)) showChatBubble(seat, text);
   }
+
+  // A short speech bubble beside the sender's seat that fades on its own.
+  // Lives in its own layer so table re-renders don't wipe it.
+  const bubbleTimers = {};
+  function showChatBubble(seat, text) {
+    const seatEl = document.querySelector(`#player-positions .table-player[data-seat="${seat}"]`);
+    const game = document.getElementById('game-screen');
+    if (!seatEl || !game || !game.classList.contains('active')) return;
+    if (document.getElementById('chat-area')?.classList.contains('open')) return; // already reading it
+    let layer = document.getElementById('chat-bubbles');
+    // Inside the game screen and before the action panels, so bids/raises stay on top
+    if (!layer) { layer = document.createElement('div'); layer.id = 'chat-bubbles';
+      game.insertBefore(layer, document.getElementById('bidding-panel') || null); }
+    let b = layer.querySelector(`.chat-bubble[data-seat="${seat}"]`);
+    if (!b) { b = document.createElement('div'); b.dataset.seat = seat; layer.appendChild(b); }
+    const team = Engine.getTeam(seat).toLowerCase();
+    const short = text.length > 70 ? text.slice(0, 68).trimEnd() + '\u2026' : text;
+    const upper = seatEl.classList.contains('seat-upper');
+    b.className = `chat-bubble team-${team}${upper ? ' below' : ''}`;
+    b.textContent = short;
+    // Place beside the avatar: below it for top seats, above it otherwise
+    let r = (seatEl.querySelector('.player-avatar') || seatEl).getBoundingClientRect();
+    if (!r.width || !r.height) {           // my avatar is hidden on sideways phones: sit above my cards
+      const anchor = seatEl.querySelector('.reaction-bar') || document.getElementById('my-hand');
+      if (anchor) r = anchor.getBoundingClientRect();
+    }
+    b.style.left = '0px'; b.style.top = '0px';
+    const bw = b.offsetWidth, bh = b.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+    let x = r.left + r.width / 2 - bw / 2;
+    x = Math.max(6, Math.min(vw - bw - 6, x));
+    let y = upper ? r.bottom + 6 : r.top - bh - 8;
+    y = Math.max(50, Math.min(vh - bh - 6, y));
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    b.style.setProperty('--tail', Math.max(12, Math.min(bw - 12, r.left + r.width / 2 - x)) + 'px');
+    b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+    clearTimeout(bubbleTimers[seat]);
+    const ms = Math.min(7000, 3000 + short.length * 50);
+    bubbleTimers[seat] = setTimeout(() => {
+      b.classList.remove('show'); b.classList.add('hide');
+      setTimeout(() => { if (b.classList.contains('hide')) b.remove(); }, 400);
+    }, ms);
+  }
+
 
 
   // === TABLE HOST VOICE ===

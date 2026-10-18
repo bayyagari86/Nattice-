@@ -1298,8 +1298,10 @@ const Game = (() => {
       case 'NO_RAISE': handleNoRaise(fromPeer); break;
       case 'CHAT':
         if (!peerToSeat.has(fromPeer)) return;
-        UI.addChatMessage(msg.name, msg.text);
-        bcast({ type: 'CHAT', name: msg.name, text: msg.text }); // relay
+        { const seat = peerToSeat.get(fromPeer); // host knows the real seat
+          const name = state.players[seat]?.name || msg.name;
+          UI.addChatMessage(name, msg.text, seat, { reaction: !!msg.r });
+          bcast({ type: 'CHAT', name, text: msg.text, seat, r: msg.r ? 1 : 0 }); } // relay
         break;
       case 'EMOJI_REACTION': {
         if (!peerToSeat.has(fromPeer)) return;
@@ -1414,7 +1416,7 @@ const Game = (() => {
         handleHostMigrated(fromPeer, msg);
         break;
       case 'CHAT':
-        UI.addChatMessage(msg.name, msg.text);
+        UI.addChatMessage(msg.name, msg.text, Number.isInteger(msg.seat) ? msg.seat : undefined, { reaction: !!msg.r });
         break;
       case 'EMOJI_REACTION':
         UI.showEmojiReaction(msg.emoji, Number.isInteger(msg.seat) ? msg.seat : undefined);
@@ -2957,8 +2959,8 @@ const Game = (() => {
       r.raiseCommitments[seat] = n;
       const msg = n > 0 ? `I can take ${n} more for sure (${why.join(', ')})` : 'Nothing certain from me';
       setTimeout(() => {
-        UI.addChatMessage(state.players[seat].name, msg);
-        if (!isSoloMode) bcast({ type: 'CHAT', name: state.players[seat].name, text: msg });
+        UI.addChatMessage(state.players[seat].name, msg, seat);
+        if (!isSoloMode) bcast({ type: 'CHAT', name: state.players[seat].name, text: msg, seat });
       }, d(400 + i * 500));
     });
     broadcastState();
@@ -3039,19 +3041,24 @@ const Game = (() => {
   }
 
   // Send chat
-  function sendChat(text) {
+  // opts.reaction: the text is a reaction phrase that already animates on the
+  // table, so it goes into the chat log without a second bubble at the seat.
+  function sendChat(text, opts) {
+    const reaction = !!(opts && opts.reaction);
     if (!isSoloMode) {
-      const msg = { type: 'CHAT', name: myName, text };
+      const msg = { type: 'CHAT', name: myName, text, seat: mySeat, r: reaction ? 1 : 0 };
       bcast(msg);
     }
-    UI.addChatMessage(myName, text);
+    UI.addChatMessage(myName, text, mySeat, { reaction });
 
-    // AI responds in solo mode after a short delay
-    if (isSoloMode) {
-      const responder = AI_NAMES[Math.floor(Math.random() * AI_NAMES.length)];
+    // AI responds in solo mode after a short delay — from a bot actually at the table
+    if (isSoloMode && !reaction) {
+      const bots = [0, 1, 2, 3, 4, 5].filter(s => s !== mySeat && state?.players?.[s]?.isAI);
+      const seat = bots.length ? bots[Math.floor(Math.random() * bots.length)] : undefined;
+      const responder = seat != null ? state.players[seat].name : AI_NAMES[Math.floor(Math.random() * AI_NAMES.length)];
       const delay = 800 + Math.random() * 1200;
       setTimeout(() => {
-        UI.addChatMessage(responder, getRandomAIChatLine());
+        UI.addChatMessage(responder, getRandomAIChatLine(), seat);
       }, delay);
     }
   }
