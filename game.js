@@ -1847,7 +1847,7 @@ const Game = (() => {
   }
 
   function processTrumpSelect(suit) {
-    if (!['spades', 'hearts', 'diamonds', 'clubs'].includes(suit)) suit = 'spades';
+    if (!['spades', 'hearts', 'diamonds', 'clubs', 'notrump'].includes(suit)) suit = 'spades';
     state.currentRound.trumpSuit = suit;
     state.phase = 'PLAYING';
     // The dealer (who shuffled) leads the first trick, not the highest bidder.
@@ -1865,7 +1865,7 @@ const Game = (() => {
 
     broadcastState();
     UI.updateAll(state, mySeat);
-    UI.showToast(`Trump is ${suit.toUpperCase()}!`);
+    UI.showToast(suit === 'notrump' ? 'No Trump this round!' : `Trump is ${suit.toUpperCase()}!`);
     checkAITurn();
   }
 
@@ -2022,8 +2022,9 @@ const Game = (() => {
         if (state.currentRound.tricksPlayed === 5 && !state.currentRound.raised) {
           const biddingTeam = state.currentRound.biddingTeam;
           const biddingTricks = state.currentRound.tricksTaken[biddingTeam];
-          if (biddingTricks >= state.currentRound.bid) {
-            // Bidding team is winning — offer raise
+          // LS (8) is still reachable with 4 of the first 5 tricks; GS (9) needs all 5
+          if (state.currentRound.bid < 9 && (biddingTricks >= 5 || (biddingTricks >= 4 && state.currentRound.bid < 8))) {
+            // Bidding team can still make a slam — offer the raise
             state.phase = 'RAISE_CHECK';
             state.currentRound.currentTrick = [];
             state.currentRound.raiseCommitments = {};
@@ -2033,9 +2034,20 @@ const Game = (() => {
             UI.updateAll(state, mySeat);
             if (Engine.getTeam(mySeat) === biddingTeam) {
               UI.showRaisePrompt(state);
-            } else if (isSoloMode) {
-              // AI teammates suggest their capability
-              setTimeout(() => aiSuggestRaiseCommitment(), d(1000));
+            }
+            // AI teammates share what they can still win
+            if (isSoloMode) setTimeout(() => aiSuggestRaiseCommitment(), d(1000));
+            // A bot bidder decides itself — after a pause if a human partner may commit
+            const bidderSeat = state.currentRound.bidder;
+            if (state.players[bidderSeat] && state.players[bidderSeat].isAI) {
+              const humanPartner = state.players.some((pl, i) => pl && !pl.isAI && i !== bidderSeat && Engine.getTeam(i) === biddingTeam);
+              const roundKey = state.currentRound.tricks.length;
+              setTimeout(() => {
+                if (!state || state.phase !== 'RAISE_CHECK' || state.currentRound.tricks.length !== roundKey) return;
+                if (!isSoloMode && !Network.getIsHost()) return;
+                if (!state.players[bidderSeat] || !state.players[bidderSeat].isAI) return;
+                aiHandleRaise(bidderSeat);
+              }, d(humanPartner ? 6000 : 1500));
             }
             // Start the countdown timer
             if (Network.getIsHost() || isSoloMode) {
@@ -2462,6 +2474,13 @@ const Game = (() => {
     }
     return n;
   }
+  // Top remaining card of its suit: every higher card is played or in my hand
+  function aiIsMasterInSuit(card, hand) {
+    if (!card || card.suit === 'joker') return false;
+    const played = aiSeen();
+    return Engine.RANKS.every(rk => Engine.RANK_VALUES[rk] <= Engine.RANK_VALUES[card.rank] ||
+      played.has(`${rk}_${card.suit}`) || hand.some(c => c.id === `${rk}_${card.suit}`));
+  }
   function aiUnseenInSuit(suit, hand, played) {
     let n = 0;
     for (const rk of Engine.RANKS) { const id = `${rk}_${suit}`; if (!played.has(id) && !hand.some(c => c.id === id)) n++; }
@@ -2590,8 +2609,17 @@ const Game = (() => {
     const important = myTeamBid ? teamTricks < bidNow : (oppTricks < bidNow && teamTricks < 10 - bidNow);
     // Cheapest card that wins; trumping goes through the overtrump check (card #4)
     const chooseWin = (wins) => {
-      const follow = wins.filter(c => c.suit !== trump && c.suit !== 'joker');
-      if (follow.length) return follow.sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0];
+      const follow = wins.filter(c => c.suit !== trump && c.suit !== 'joker')
+        .sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank]);
+      if (follow.length) {
+        // Opponents still to play could hold a higher card (e.g. the King over my
+        // Queen): win with the top card of the suit instead, if I hold it.
+        if (opponentSeatsAfter.length && important) {
+          const master = follow.find(c => aiIsMasterInSuit(c, hand));
+          if (master) return master;
+        }
+        return follow[0];
+      }
       const trumpWins = wins.filter(c => c.suit === trump);
       if (trumpWins.length && leadSuit && leadSuit !== trump && trump !== 'notrump') {
         return aiPickRuff(seat, hand, trumpWins, playable, trump, leadSuit, opponentSeatsAfter, important).card;
@@ -2609,8 +2637,16 @@ const Game = (() => {
       chosen = getDumpCard(playable, trump, leadSuit);
 
     } else if (teammateWinning && !isLastPlayer) {
-      // Teammate winning but opponents still to act — dump cheap, save big guns
-      chosen = getDumpCard(playable, trump, leadSuit);
+      // Teammate winning but opponents still to act. If the partner's card can
+      // still be beaten in suit (say by the King) and I hold the top card,
+      // take the trick with it; otherwise dump cheap and save the big guns.
+      const winCard = currentWinCard;
+      const myMaster = leadSuit && leadSuit !== trump && winCard && winCard.suit === leadSuit && important &&
+        !aiIsMasterInSuit(winCard, hand)
+        ? playable.filter(c => c.suit === leadSuit && aiIsMasterInSuit(c, hand))
+            .sort((a, b) => Engine.RANK_VALUES[a.rank] - Engine.RANK_VALUES[b.rank])[0]
+        : null;
+      chosen = myMaster || getDumpCard(playable, trump, leadSuit);
 
     } else {
       // Need to contest or win this trick
@@ -2836,8 +2872,10 @@ const Game = (() => {
         .sort((a,b) => Engine.RANK_VALUES[b.rank] - Engine.RANK_VALUES[a.rank]);
 
       if (longSuitCards.length >= 3) {
-        // Lead 2nd highest — conceals Ace/King, opponent can't read hand
-        return longSuitCards[1];
+        // Holding the top card: cash it rather than lead under it into the King.
+        // Otherwise lead low and keep the honours.
+        if (aiIsMasterInSuit(longSuitCards[0], hand) && !ruffDanger.has(longSuit)) return longSuitCards[0];
+        return longSuitCards[longSuitCards.length - 1];
       }
       return finalPool[0];
     }
@@ -2922,25 +2960,27 @@ const Game = (() => {
   }
 
   function aiHandleRaise(seat) {
-    if (Engine.getTeam(seat) !== state.currentRound.biddingTeam) return;
-    const tricks = state.currentRound.tricksTaken[state.currentRound.biddingTeam];
-    const remaining = 9 - state.currentRound.tricksPlayed;
-    // If we've won all 5 so far and have strong cards, go for LS/GS
-    // 8 tricks score 15 with or without a raise, and a failed raise hands the
-    // opponents double. So only raise when this hand alone guarantees the 3
-    // tricks still needed for LS.
-    if (tricks === 5 && remaining === 4) {
-      const hand = state.hands[seat] || [];
-      const trump = state.currentRound.trumpSuit;
-      const played = aiSeen();
-      let sure = hand.some(c => c.id === 'BIG_JOKER') ? 1 : 0;
-      if (trump && trump !== 'notrump') {
-        let masters = hand.filter(c => c.suit === trump && aiHigherTrumpsOut(trump, c.rank, hand, played) === 0).length;
-        if (masters && !played.has('BIG_JOKER') && !sure) masters--; // the unseen Big Joker can take one
-        sure += masters;
-      }
-      if (sure >= 3) { processRaise(8); return; }
+    const r = state.currentRound;
+    if (Engine.getTeam(seat) !== r.biddingTeam || seat !== r.bidder) { processNoRaise(); return; }
+    const tricks = r.tricksTaken[r.biddingTeam];
+    const remaining = 9 - r.tricksPlayed;
+    // A slam bonus now needs a declared LS/GS, and a failed raise hands the
+    // opponents double. So a bot raises only when the tricks still needed are
+    // covered by its own certain winners plus most of its partners' commitments.
+    const hand = state.hands[seat] || [];
+    const trump = r.trumpSuit;
+    const played = aiSeen();
+    let sure = hand.some(c => c.id === 'BIG_JOKER') ? 1 : 0;
+    if (trump && trump !== 'notrump') {
+      let masters = hand.filter(c => c.suit === trump && aiHigherTrumpsOut(trump, c.rank, hand, played) === 0).length;
+      if (masters && !played.has('BIG_JOKER') && !sure) masters--; // the unseen Big Joker can take one
+      sure += masters;
     }
+    const others = Object.entries(r.raiseCommitments || {})
+      .filter(([s]) => +s !== seat).reduce((a, [, n]) => a + (+n || 0), 0);
+    const likely = Math.min(remaining, sure + Math.floor(others * 0.6));
+    if (tricks === 5 && r.bid < 9 && sure >= remaining) { processRaise(9); return; }      // GS
+    if (r.bid < 8 && tricks + likely >= 8 && sure >= Math.max(1, 8 - tricks - 1)) { processRaise(8); return; } // LS
     processNoRaise();
   }
 

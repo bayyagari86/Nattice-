@@ -13,8 +13,9 @@
 // - Must follow suit if possible, BUT jokers can be played anytime
 // - Cannot lead a trick with a joker
 // - Scoring: bid met = bid value pts; bid failed = opponents get 2x bid pts
-// - After 5 tricks, bidding team can raise bid
-// - LS (8 tricks) = 15 pts; GS (9 tricks) = 30 pts
+// - After 5 tricks, bidding team can raise to LS (needs 4 of 5) or GS (needs 5 of 5)
+// - LS (bid/raised to 8, take 8) = 15 pts; GS (bid/raised to 9, take 9) = 30 pts;
+//   without declaring, extra tricks just score the bid
 // - Game to 62 points
 
 const Engine = (() => {
@@ -259,14 +260,15 @@ const Engine = (() => {
       const biddingTeam = gameState.currentRound?.biddingTeam;
       const tricksPlayed = gameState.currentRound?.tricksPlayed || 0;
       const tricksTaken = gameState.currentRound?.tricksTaken || { A: 0, B: 0 };
-      const isWinningTeam = tricksTaken[biddingTeam] >= tricksPlayed;
+      const taken = tricksTaken[biddingTeam] || 0;
 
-      // Raise option only comes after 5 tricks, and only for winning team
+      // Raise option only comes after 5 tricks, and only to a slam still in reach:
+      // LS (8) with at least 4 of the first 5 tricks, GS (9) with all 5
       if (tricksPlayed < 5) return false;
-      if (!isWinningTeam) return false;
-
-      // Winning team can raise up to 9
-      return bid > currentHighBid && bid <= 9;
+      if (bid <= currentHighBid) return false;
+      if (bid === 8) return taken >= 4;
+      if (bid === 9) return taken >= 5;
+      return false;
     }
 
     // Default fallback (shouldn't reach here in normal flow)
@@ -283,11 +285,12 @@ const Engine = (() => {
 
     const result = { A: 0, B: 0, gs: false, ls: false };
 
-    if (biddingTricks === 9) {
+    // Slam bonuses only for a declared slam (bid or raised to 8 / 9)
+    if (bid >= 9 && biddingTricks === 9) {
       // Grand Slam
       result[biddingTeam] = 30;
       result.gs = true;
-    } else if (biddingTricks === 8) {
+    } else if (bid === 8 && biddingTricks >= 8) {
       // Little Slam
       result[biddingTeam] = 15;
       result.ls = true;
