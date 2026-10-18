@@ -799,8 +799,16 @@ html, body {
   pointer-events: none;
 }
 .round-history-label { font-size: 8px; font-weight: 700; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; }
-.round-history-row { display: flex; gap: 3px; align-items: center; }
+/* Fixed width: swipe left/right through past rounds; opens at the latest */
+.round-history-row { display: flex; gap: 3px; align-items: center; pointer-events: auto;
+  max-width: 116px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  touch-action: pan-x; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 2px 1px; }
+.round-history-row::-webkit-scrollbar { display: none; }
+.round-history-row.more-left { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px); mask-image: linear-gradient(90deg, transparent 0, #000 14px); }
+.round-history-row.more-right { -webkit-mask-image: linear-gradient(270deg, transparent 0, #000 14px); mask-image: linear-gradient(270deg, transparent 0, #000 14px); }
+.round-history-row.more-left.more-right { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%); }
 .round-dot {
+  flex: 0 0 auto;
   width: 13px; height: 13px;
   border-radius: 50%;
   font-size: 7px; font-weight: 800;
@@ -2308,3 +2316,5 @@ body[data-art].compact-land .table-player .player-cards-count { color: rgba(255,
 .goal-chip { display: inline-block; margin-left: 3px; padding: 0 5px; border-radius: 8px; font-size: .92em; font-weight: 700;
   background: rgba(251,191,36,.18); color: #fde68a; border: 1px solid rgba(251,191,36,.5); white-space: nowrap; }
 .goal-chip.done { background: rgba(74,222,128,.18); color: #bbf7d0; border-color: rgba(74,222,128,.55); }
+/* Short portrait phones: keep the rounds row above the docked reaction strip */
+body.compact-port #round-history { bottom: 40px; }

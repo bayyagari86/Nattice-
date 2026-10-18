@@ -1139,6 +1139,22 @@ const UI = (() => {
       <div class="round-history-row">${dotsHtml}</div>
       <div class="round-history-score">You ${myRoundsWon} \u2013 ${oppRoundsWon} Opp</div>
     `;
+    // Scrollable row: open at the latest round, fade the edge that has more
+    const row = el.querySelector('.round-history-row');
+    if (row) {
+      const fade = () => {
+        row.classList.toggle('more-left', row.scrollLeft > 2);
+        row.classList.toggle('more-right', row.scrollLeft + row.clientWidth < row.scrollWidth - 2);
+      };
+      if (history.length !== el._lastCount) { row.scrollLeft = row.scrollWidth; el._lastCount = history.length; }
+      else if (typeof el._scroll === 'number') row.scrollLeft = el._scroll;
+      row.addEventListener('scroll', () => { el._scroll = row.scrollLeft; fade(); }, { passive: true });
+      row.addEventListener('wheel', e => {               // mouse wheel scrolls sideways
+        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { row.scrollLeft += e.deltaY; e.preventDefault(); }
+      }, { passive: false });
+      fade();
+      if (history.length === el._lastCount && row.scrollLeft + row.clientWidth >= row.scrollWidth - 2) el._scroll = row.scrollLeft;
+    }
   }
 
   // === BIDDING UI ===
