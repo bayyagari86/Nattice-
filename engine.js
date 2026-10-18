@@ -14,7 +14,7 @@
 // - Cannot lead a trick with a joker
 // - Scoring: bid met = bid value pts; bid failed = opponents get 2x bid pts
 // - After 5 tricks, bidding team can raise to LS (needs 4 of 5) or GS (needs 5 of 5)
-// - LS (bid/raised to 8, take 8) = 15 pts; GS (bid/raised to 9, take 9) = 30 pts;
+// - LS (bid/raised to 8, take 8) = 15 pts; GS (bid/raised to 9, take 9) = 20 pts;
 //   without declaring, extra tricks just score the bid
 // - Game to 62 points
 
@@ -288,7 +288,7 @@ const Engine = (() => {
     // Slam bonuses only for a declared slam (bid or raised to 8 / 9)
     if (bid >= 9 && biddingTricks === 9) {
       // Grand Slam
-      result[biddingTeam] = 30;
+      result[biddingTeam] = 20;
       result.gs = true;
     } else if (bid === 8 && biddingTricks >= 8) {
       // Little Slam

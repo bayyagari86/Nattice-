@@ -98,7 +98,7 @@ const Badges = (() => {
     }
     if (result.gs && result.biddingTeam === myTeam) {
       stats.grandSlamCount++;
-      stats.points += 30;
+      stats.points += 20;
     }
     checkBadges();
   }
