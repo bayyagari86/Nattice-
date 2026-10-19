@@ -155,6 +155,8 @@ const Network = (() => {
         });
 
         p.on('connection', (conn) => setupConnection(conn));
+        // Push-to-talk audio: one-way calls from whoever is talking
+        p.on('call', (call) => { if (onCallCallback) { try { onCallCallback(call); } catch (_) { try { call.close(); } catch (__) {} } } else { try { call.close(); } catch (_) {} } });
 
         p.on('error', (err) => {
           const type = err && err.type;
@@ -512,6 +514,13 @@ const Network = (() => {
   }
 
   function onMessage(cb) { onMessageCallback = cb; }
+  let onCallCallback = null;
+  function onCall(cb) { onCallCallback = cb; }
+  // Start a one-way audio call to another player's main peer id
+  function callPeer(peerId, stream, metadata) {
+    if (!peer || peer.destroyed || !peerId || frozen) return null;
+    try { return peer.call(peerId, stream, { metadata: metadata || {} }); } catch (_) { return null; }
+  }
   function onPeerJoin(cb) { onPeerJoinCallback = cb; }
   function onPeerLeave(cb) { onPeerLeaveCallback = cb; }
   function onConnected(cb) { onConnectedCallback = cb; }
@@ -571,7 +580,7 @@ const Network = (() => {
     init, createRoom, joinRoom, setRoom,
     connectToPeer, claimAlias, releaseAlias,
     broadcast, sendTo, sendByeBestEffort,
-    onMessage, onPeerJoin, onPeerLeave, onConnected, onDisconnected, onSignalingChange,
+    onMessage, onCall, callPeer, onPeerJoin, onPeerLeave, onConnected, onDisconnected, onSignalingChange,
     startHeartbeat, stopHeartbeat, resetLiveness,
     getPeerId, getAliasId, getIsHost, getConnectedPeers, getPeerCount, isConnectedTo, hasRoomKey, isReady,
     promoteToHost, demoteToClient, dropPeer,

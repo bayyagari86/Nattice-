@@ -329,6 +329,13 @@ const Extras = (() => {
         Sound.getHost(), Sound.setHost, v => { if (v !== 'off') Sound.host('trump_hearts'); });
       seg('talk-options', [['on', 'On', 'Bots chatter'], ['off', 'Off', 'Quiet bots']], Sound.getTalk(), Sound.setTalk);
     }
+    const vEl = document.getElementById('voice-options');
+    if (vEl && typeof Voice !== 'undefined') {
+      const cur = Voice.getPref();
+      vEl.innerHTML = [['on', 'On', 'Hold to talk'], ['off', 'Off', 'No voice']].map(([k, l, s]) =>
+        `<button class="seg-opt ${cur === k ? 'selected' : ''}" data-voice="${k}"><b>${l}</b><small>${s}</small></button>`).join('');
+      vEl.querySelectorAll('.seg-opt').forEach(b => b.onclick = () => { Voice.setPref(b.dataset.voice); renderSettings(); });
+    }
     document.querySelectorAll('#speed-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_SPEED, b.dataset.speed); renderSettings(); });
     document.querySelectorAll('#raise-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_RAISE, b.dataset.raise); renderSettings(); });
     document.querySelectorAll('#botname-options .seg-opt').forEach(b => b.onclick = () => { lsSet(LS_NAMES, b.dataset.names); renderSettings(); renameBotsNow(); });

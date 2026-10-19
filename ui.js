@@ -700,6 +700,8 @@ const UI = (() => {
       const el = document.createElement('div');
       el.className = `table-player ${isCurrentPlayer ? 'active' : ''} ${seat === mySeat ? 'me' : ''} ${i === 3 ? 'seat-top' : ''} team-${team.toLowerCase()}`;
       el.style.cssText = `left:${pos.x}%;top:${pos.y}%;`;
+      el.dataset.seat = seat;
+      if (typeof Voice !== 'undefined' && Voice.isTalking(seat)) el.classList.add('talking');
 
       // Build card backs HTML for other players
       let cardBacksHtml = '';
@@ -734,7 +736,7 @@ const UI = (() => {
 
       el.innerHTML = `
         <div class="reaction-float" id="reaction-float-${seat}"></div>
-        <div class="player-avatar">${player.name.charAt(0).toUpperCase()}</div>
+        <div class="player-avatar">${player.name.charAt(0).toUpperCase()}<span class="talk-badge" aria-hidden="true"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2z"/></svg></span></div>
         <div class="player-name team-name-${team.toLowerCase()}">${seat === mySeat ? 'You' : player.name}${player.isAI ? ' \ud83e\udd16' : ''}</div>
         <div class="player-meta">${seat !== mySeat && team === Engine.getTeam(mySeat) ? '<span class="partner-tag">Partner</span>' : `Team ${team}`}${isBidder ? ' \u00b7 Bidder' : ''}${seat === state.dealer ? ' \u00b7 Dealer' : ''}${goalChip(state, seat)}</div>
         ${reactionBarHtml}

@@ -52,6 +52,13 @@ const Sound = (() => {
   }
   ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown'].forEach(ev => window.addEventListener(ev, unlock, { passive: true, capture: true }));
 
+  // Dip game sounds while someone is talking on voice chat
+  function duck(on) {
+    if (!master || !ctx) return;
+    const v = on ? 0.25 : 0.9;
+    try { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(v, ctx.currentTime, 0.08); } catch (_) { master.gain.value = v; }
+  }
+
   function canPlay() { const c = ensureCtx(); return !!(c && c.state === 'running'); }
 
   function load(url) {
@@ -232,7 +239,7 @@ const Sound = (() => {
   return {
     getSfx, getHost, getTalk,
     setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), setTalk: v => lsSet(LS_TALK, v),
-    reaction, host, sting, playUrl, unlock, canPlay, startCapture, stopCapture, preload,
+    reaction, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
     reelSting, reelVoice, reelBed,
     _ctx: () => ctx,
   };

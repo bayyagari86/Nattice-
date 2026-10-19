@@ -1301,6 +1301,20 @@ const Game = (() => {
         UI.addChatMessage(msg.name, msg.text);
         bcast({ type: 'CHAT', name: msg.name, text: msg.text }); // relay
         break;
+      case 'VOICE': {           // push-to-talk on/off: relay with the real seat
+        if (!peerToSeat.has(fromPeer)) return;
+        const seat = peerToSeat.get(fromPeer);
+        if (typeof Voice !== 'undefined') Voice.setTalking(seat, !!msg.on);
+        bcast({ type: 'VOICE', seat, on: !!msg.on });
+        break;
+      }
+      case 'VOICE_NUDGE': {     // a listener isn't getting a talker's audio: pass it to the talker
+        if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.to)) return;
+        const from = peerToSeat.get(fromPeer);
+        if (msg.to === mySeat) { if (typeof Voice !== 'undefined') Voice.onNudge(from); }
+        else { const pid = seatToPeer.get(msg.to); if (pid) send(pid, { type: 'VOICE_NUDGE', from }); }
+        break;
+      }
       case 'EMOJI_REACTION': {
         if (!peerToSeat.has(fromPeer)) return;
         const fromSeat = peerToSeat.get(fromPeer); // trust the host's mapping, not the message
@@ -1415,6 +1429,12 @@ const Game = (() => {
         break;
       case 'CHAT':
         UI.addChatMessage(msg.name, msg.text);
+        break;
+      case 'VOICE':
+        if (Number.isInteger(msg.seat) && msg.seat !== mySeat && typeof Voice !== 'undefined') Voice.setTalking(msg.seat, !!msg.on);
+        break;
+      case 'VOICE_NUDGE':
+        if (Number.isInteger(msg.from) && typeof Voice !== 'undefined') Voice.onNudge(msg.from);
         break;
       case 'EMOJI_REACTION':
         UI.showEmojiReaction(msg.emoji, Number.isInteger(msg.seat) ? msg.seat : undefined);
@@ -3056,6 +3076,19 @@ const Game = (() => {
     }
   }
 
+  // Push-to-talk: tell the table who is talking (the audio itself goes peer to peer)
+  function sendVoiceState(on) {
+    if (isSoloMode || !state) return;
+    if (Network.getIsHost()) bcast({ type: 'VOICE', seat: mySeat, on: !!on });
+    else bcast({ type: 'VOICE', on: !!on });
+  }
+
+  function sendVoiceNudge(talkerSeat) {
+    if (isSoloMode || !state || !Number.isInteger(talkerSeat)) return;
+    if (Network.getIsHost()) { const pid = seatToPeer.get(talkerSeat); if (pid) send(pid, { type: 'VOICE_NUDGE', from: mySeat }); }
+    else bcast({ type: 'VOICE_NUDGE', to: talkerSeat });
+  }
+
   // Broadcast emoji reaction to all players
   function broadcastEmoji(emoji) {
     if (!isSoloMode) {
@@ -3230,7 +3263,7 @@ const Game = (() => {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
-    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji,
+    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji, sendVoiceState, sendVoiceNudge,
     stopAINameRotation, applyBotNames,
     kickPlayer,
     getSavedSession, resumeSavedSession, clearSession,
