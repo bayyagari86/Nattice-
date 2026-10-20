@@ -2361,3 +2361,7 @@ body.compact-port #round-history { bottom: 40px; }
 @media (prefers-reduced-motion: reduce) { .ptt-btn.live, .table-player.talking .player-avatar { animation: none; } }
 /* Short hand area (sideways phones, laptops): mic sits beside the chat button */
 @media (orientation: landscape) { .ptt-btn { top: 6px; right: 54px; } }
+
+.history-actions { display: flex; gap: 8px; margin-top: 8px; }
+.history-actions .btn { flex: 1; padding: 10px 8px; font-size: 13px; }
+.history-actions .btn:disabled { opacity: .45; }

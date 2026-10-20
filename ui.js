@@ -1416,6 +1416,7 @@ const UI = (() => {
 
   // === RESULTS ===
   function showRoundResult(result) {
+    try { if (typeof History !== 'undefined') setTimeout(() => History.record(result), 400); } catch (_) {}
     const overlay = document.getElementById('result-overlay');
     overlay.style.display = 'flex';
 

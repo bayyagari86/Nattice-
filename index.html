@@ -31,7 +31,7 @@
   <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./style.css?v=40">
+  <link rel="stylesheet" href="./style.css?v=41">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -278,6 +278,14 @@
       <h3>Voice chat</h3>
       <div class="seg-group" id="voice-options"></div>
       <p class="theme-note">In online games, hold the mic button (or the V key) to talk to the table. Audio is sent only while you hold it. Turning this off hides the button and mutes other players' voices.</p>
+      <h3>Game history</h3>
+      <div class="seg-group" id="history-options"></div>
+      <p class="theme-note" id="history-summary"></p>
+      <div class="history-actions">
+        <button class="btn btn-secondary" id="history-share-btn">Share game log</button>
+        <button class="btn btn-secondary" id="history-clear-btn">Clear</button>
+      </div>
+      <p class="theme-note">Every finished round — bids, trump, raises and each trick — is saved on this phone only. Nothing is sent unless you tap Share game log. Shared logs help tune the bots to how people really play.</p>
       <h3>Bot names</h3>
       <div class="seg-group" id="botname-options"></div>
       <div class="friend-names" id="friend-names"></div>
@@ -382,17 +390,18 @@
   </div>
 
   <!-- Scripts -->
-  <script src="./crypto.js?v=40"></script>
-  <script src="./engine.js?v=40"></script>
-  <script src="./network.js?v=40"></script>
-  <script src="./ui.js?v=40"></script>
-  <script src="./badges.js?v=40"></script>
-  <script src="./fx.js?v=40"></script>
-  <script src="./sound.js?v=40"></script>
-  <script src="./extras.js?v=40"></script>
-  <script src="./reel.js?v=40"></script>
-  <script src="./voice.js?v=40"></script>
-  <script src="./game.js?v=40"></script>
+  <script src="./crypto.js?v=41"></script>
+  <script src="./engine.js?v=41"></script>
+  <script src="./network.js?v=41"></script>
+  <script src="./ui.js?v=41"></script>
+  <script src="./badges.js?v=41"></script>
+  <script src="./fx.js?v=41"></script>
+  <script src="./sound.js?v=41"></script>
+  <script src="./extras.js?v=41"></script>
+  <script src="./reel.js?v=41"></script>
+  <script src="./voice.js?v=41"></script>
+  <script src="./history.js?v=41"></script>
+  <script src="./game.js?v=41"></script>
   <script>
     // Service Worker registration
     if ('serviceWorker' in navigator) {

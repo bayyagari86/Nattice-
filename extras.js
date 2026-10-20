@@ -329,6 +329,23 @@ const Extras = (() => {
         Sound.getHost(), Sound.setHost, v => { if (v !== 'off') Sound.host('trump_hearts'); });
       seg('talk-options', [['on', 'On', 'Bots chatter'], ['off', 'Off', 'Quiet bots']], Sound.getTalk(), Sound.setTalk);
     }
+    const hEl = document.getElementById('history-options');
+    if (hEl && typeof History !== 'undefined') {
+      const cur = History.getPref();
+      hEl.innerHTML = [['on', 'On', 'Save rounds'], ['off', 'Off', 'Don\'t save']].map(([k, l, s]) =>
+        `<button class="seg-opt ${cur === k ? 'selected' : ''}" data-hist="${k}"><b>${l}</b><small>${s}</small></button>`).join('');
+      hEl.querySelectorAll('.seg-opt').forEach(b => b.onclick = () => { History.setPref(b.dataset.hist); renderSettings(); });
+      const sm = History.summary();
+      const pct = (a, b) => (b ? Math.round((100 * a) / b) + '%' : '–');
+      const sumEl = document.getElementById('history-summary');
+      if (sumEl) sumEl.textContent = sm.rounds
+        ? `${sm.rounds} round${sm.rounds === 1 ? '' : 's'} saved since ${new Date(sm.since).toLocaleDateString()}. Your bids made: ${pct(sm.myMade, sm.myBids)} of ${sm.myBids}. Your team's bids made: ${pct(sm.teamMade, sm.teamBids)} of ${sm.teamBids}.`
+        : 'No rounds saved yet.';
+      const shareBtn = document.getElementById('history-share-btn');
+      const clearBtn = document.getElementById('history-clear-btn');
+      if (shareBtn) { shareBtn.disabled = !sm.rounds; shareBtn.onclick = () => History.share().catch(() => {}); }
+      if (clearBtn) { clearBtn.disabled = !sm.rounds; clearBtn.onclick = () => { if (confirm('Delete all saved rounds on this phone?')) { History.clear(); renderSettings(); } }; }
+    }
     const vEl = document.getElementById('voice-options');
     if (vEl && typeof Voice !== 'undefined') {
       const cur = Voice.getPref();

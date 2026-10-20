@@ -3388,6 +3388,7 @@ const Game = (() => {
   window.addEventListener('pagehide', gracefulExit);
 
   return {
+    isSolo: () => isSoloMode,
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
