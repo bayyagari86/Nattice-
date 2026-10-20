@@ -559,7 +559,7 @@ const Extras = (() => {
     const duration = style === 'festival' ? 3.6
       : entry && ENTRANCES[entry.entrance] ? ENTRANCES[entry.entrance]
       : (1.9 + Math.random() * 1.3); // varied timing
-    if (entry && !opts.silent && typeof Sound !== 'undefined') Sound.reaction(entry);
+    if (entry && !opts.silent && typeof Sound !== 'undefined') Sound.reaction(entry, opts.seat);
     // Split words so the gradient never swallows colour emoji; 'wave' animates word by word.
     const parts = String(phrase).split(EMOJI_RE).filter(Boolean);
     let wordIdx = 0;

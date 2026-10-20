@@ -1514,7 +1514,7 @@ const UI = (() => {
     if (typeof Extras !== 'undefined') {
       const st = Game.getState && Game.getState();
       const p = st && st.players && seat != null ? st.players[seat] : null;
-      Extras.showReaction(emoji, p ? { name: seat === Game.getMySeat() ? 'You' : p.name, team: Engine.getTeam(seat) } : {});
+      Extras.showReaction(emoji, p ? { name: seat === Game.getMySeat() ? 'You' : p.name, team: Engine.getTeam(seat), seat } : {});
       return;
     }
     const centerEl = document.getElementById('center-emoji');

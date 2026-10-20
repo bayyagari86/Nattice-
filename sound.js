@@ -172,12 +172,18 @@ const Sound = (() => {
 
   // ---------- Reactions ----------
   // entry = { id, entrance, mood } from the Extras catalogue
-  function reaction(entry) {
+  // Each seat has its own voice (a = Fenrir, b = Leda, c = Puck), so the table sounds like different people.
+  function voiceFor(seat) { return 'abc'[((Number.isInteger(seat) ? seat : 0) % 3 + 3) % 3]; }
+  function reaction(entry, seat) {
     if (!entry || getSfx() === 'off') return;
     unlock();
     const special = entry.entrance === 'drumroll' ? 'drumroll' : null;
     sting(special || entry.mood || 'celebrate');
-    if (getSfx() === 'voice' && entry.id) playUrl(`${BASE}${entry.id}.mp3`, { delay: special ? 0.55 : 0.18, gain: 1 });
+    if (getSfx() === 'voice' && entry.id) {
+      const opts = { delay: special ? 0.55 : 0.18, gain: 1 };
+      playUrl(`${BASE}${entry.id}_${voiceFor(seat)}.mp3`, opts)
+        .then(d => { if (!d && canPlay()) playUrl(`${BASE}${entry.id}.mp3`, opts); });
+    }
   }
 
   // ---------- Table host ----------
@@ -239,7 +245,7 @@ const Sound = (() => {
   return {
     getSfx, getHost, getTalk,
     setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), setTalk: v => lsSet(LS_TALK, v),
-    reaction, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
+    reaction, voiceFor, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
     reelSting, reelVoice, reelBed,
     _ctx: () => ctx,
   };
