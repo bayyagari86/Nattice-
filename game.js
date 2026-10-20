@@ -2459,19 +2459,107 @@ const Game = (() => {
     return { est: t, ctrl };
   }
 
-  function aiBidPlan(hand) {
+  // ===== LEARNING FROM THIS PHONE'S GAMES — only strategies that won =====
+  // Every hand is rebuilt from the saved tricks (all 54 cards get played), so
+  // a person's bid can be compared with what a bot would have bid on the very
+  // same cards. A strategy is adopted only when the people here used it often
+  // enough and it scored better than the bots' own play; strategies that lost,
+  // or that lack evidence, are ignored.
+  const LEARN_MIN = 15;              // at least this many real examples
+  const BOT_MADE_RATE = 0.88;        // bots' own make rate at their planned bid (all-bot games)
+  const SUIT_OF = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs' };
+  function cardFromCode(c) {
+    if (c === 'BJ') return { id: 'BIG_JOKER', suit: 'joker', rank: 'BIG' };
+    if (c === 'SJ') return { id: 'SMALL_JOKER', suit: 'joker', rank: 'SMALL' };
+    const suit = SUIT_OF[c.slice(-1)], rank = c.slice(0, -1);
+    return { id: `${rank}_${suit}`, suit, rank };
+  }
+  function handsFromEntry(e) {
+    const hands = [[], [], [], [], [], []];
+    for (const [lead, codes] of e.tricks) codes.split(' ').forEach((c, i) => hands[(lead + i) % 6].push(cardFromCode(c)));
+    return hands;
+  }
+  // Lower edge of a 90% range for a success rate (Wilson) — "clearly at least"
+  function lowEdge(k, n) {
+    if (!n) return 0;
+    const z = 1.645, p = k / n, d = 1 + z * z / n;
+    return Math.max(0, (p + z * z / (2 * n) - z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))) / d);
+  }
+
+  function aiLearnFrom(list) {
+    const out = {
+      boldBid: 0, boldLS: false, boldGS: false,
+      bid: { n: 0, made: 0, need: null, adopted: false },
+      ls: { n: 0, made: 0, need: null, adopted: false },
+      gs: { n: 0, made: 0, need: null, adopted: false },
+    };
+    let baseN = 0, baseMade = 0;
+    const bold = [];
+    for (const e of list || []) {
+      if (!e || !Array.isArray(e.tricks) || e.tricks.length !== 9 || e.bidder == null || e.bidder < 0) continue;
+      const team = e.team, humanBidder = (e.humans || []).includes(e.bidder);
+      const won = Math.max(0, ...(e.bids || []).filter(b => b[0] === e.bidder).map(b => b[1] || 0)) || e.bid;
+      const taken = (e.taken && e.taken[team]) || 0;
+      let hand;
+      try { hand = handsFromEntry(e)[e.bidder]; } catch (_) { continue; }
+      if (hand.length !== 9) continue;
+      const now = aiBidPlan(hand, 0).max, withBold = aiBidPlan(hand, 0.5).max;
+      // Someone bid exactly what the bolder rule would bid, one level above a
+      // bot's normal bid. People's bids teach it; once bots bid this way too,
+      // their own results count, so the rule is dropped if bots can't make it.
+      if (won === now + 1 && withBold >= won) { bold.push({ won, made: taken >= won, human: humanBidder }); continue; }
+      if (!humanBidder) { baseN++; if (taken >= won) baseMade++; continue; }
+      // Raises the person made after 5 tricks
+      if (e.raised && e.bid === 8) { out.ls.n++; if (taken >= 8) out.ls.made++; out.ls.base = (out.ls.base || 0) + won; }
+      if (e.raised && e.bid >= 9) { out.gs.n++; if (taken >= 9) out.gs.made++; out.gs.base = (out.gs.base || 0) + won; }
+    }
+    const q = baseN >= 20 ? baseMade / baseN : BOT_MADE_RATE;
+    // Bolder bids: expected points at the higher level vs the bot's lower bid
+    out.bid.n = bold.length; out.bid.made = bold.filter(b => b.made).length;
+    if (bold.length) {
+      const avg = bold.reduce((a, b) => a + b.won, 0) / bold.length;
+      // won*(3p-2) > (won-1)*(3q-2)  →  p > (2 + (avg-1)*(3q-2)/avg) / 3
+      out.bid.need = Math.min(1, (2 + ((avg - 1) * (3 * q - 2)) / avg) / 3);
+      out.bid.adopted = bold.length >= LEARN_MIN && lowEdge(out.bid.made, bold.length) > out.bid.need;
+    }
+    if (out.bid.adopted) out.boldBid = 0.5;
+    // Raises: LS pays 15 (fail hands 16 to the other side); GS 20 (fail 18); not raising keeps the bid
+    for (const [k, win, lose] of [['ls', 15, 16], ['gs', 20, 18]]) {
+      const x = out[k];
+      if (!x.n) continue;
+      const keep = x.base / x.n;                 // points for simply making the original bid
+      x.need = Math.min(1, (keep + lose) / (win + lose));
+      x.adopted = x.n >= LEARN_MIN && lowEdge(x.made, x.n) > x.need;
+      delete x.base;
+    }
+    out.boldLS = out.ls.adopted; out.boldGS = out.gs.adopted;
+    return out;
+  }
+  let learnedCache = null, learnedAt = -1;
+  function aiLearned() {
+    if (typeof History === 'undefined' || History.getPref() === 'off') return { boldBid: 0, boldLS: false, boldGS: false };
+    const v = History.version();
+    if (learnedCache && learnedAt === v) return learnedCache;
+    learnedCache = aiLearnFrom(History.get()); learnedAt = v;
+    return learnedCache;
+  }
+
+  function aiBidPlan(hand, boldness) {
+    const bold = boldness == null ? aiLearned().boldBid : boldness; // 0, or 0.5 once learned from winning games
     let best = null;
     for (const trump of [...AI_SUITS, 'notrump']) {
       const e = aiEstimateTricks(hand, trump);
       if (!best || e.est > best.est + (trump === 'notrump' ? 0.25 : 0)) best = { trump, ...e };
     }
     const { est, ctrl, trump } = best;
-    let max = Math.floor(est + AI_PARTNER_TRICKS + 1e-9);
+    const e = est + bold;
+    let max = Math.floor(e + AI_PARTNER_TRICKS + 1e-9);
     const nt = trump === 'notrump';
-    // Strong trump control is required for 6+ (card #1, and the Big Joker caveat)
-    const ok6 = est >= 3.6 && (nt ? ctrl.big : (ctrl.n >= 3 && (ctrl.A || ctrl.big)));
-    const ok7 = est >= 4.6 && (nt ? (ctrl.big && ctrl.small) : (ctrl.n >= 4 && (ctrl.big + ctrl.A + ctrl.K) >= 2));
-    const ok8 = est >= 5.8 && (nt ? false : (ctrl.n >= 5 && ctrl.big && ctrl.A));
+    // Strong trump control is required for 6+ (card #1, and the Big Joker caveat).
+    // Learned boldness only shifts the trick estimate, never these control rules.
+    const ok6 = e >= 3.6 && (nt ? ctrl.big : (ctrl.n >= 3 && (ctrl.A || ctrl.big)));
+    const ok7 = e >= 4.6 && (nt ? (ctrl.big && ctrl.small) : (ctrl.n >= 4 && (ctrl.big + ctrl.A + ctrl.K) >= 2));
+    const ok8 = e >= 5.8 && (nt ? false : (ctrl.n >= 5 && ctrl.big && ctrl.A));
     if (max >= 8 && !ok8) max = 7;
     if (max >= 7 && !ok7) max = 6;
     if (max >= 6 && !ok6) max = 5;
@@ -3150,8 +3238,10 @@ const Game = (() => {
       .filter(([s]) => +s !== seat).reduce((a, [, n]) => a + (+n || 0), 0);
     r.raiseCommitments[seat] = own;
     const total = Math.min(remaining, own + others);
-    if (tricks === 5 && r.bid < 9 && total >= remaining) { processRaise(9); return; }   // GS
-    if (r.bid < 8 && tricks + total >= 8) { processRaise(8); return; }                  // LS
+    const L = aiLearned();
+    const gsSlack = L.boldGS ? 1 : 0, lsSlack = L.boldLS ? 1 : 0; // learned only from raises that won
+    if (tricks === 5 && r.bid < 9 && total >= remaining - gsSlack) { processRaise(9); return; }   // GS
+    if (r.bid < 8 && tricks + total >= 8 - lsSlack) { processRaise(8); return; }                  // LS
     // Wait for a human partner who hasn't committed yet; the timer still applies
     const humanPending = state.players.some((pl, i) => pl && !pl.isAI && i !== seat &&
       Engine.getTeam(i) === r.biddingTeam && !(String(i) in (r.raiseCommitments || {})));
@@ -3389,6 +3479,7 @@ const Game = (() => {
 
   return {
     isSolo: () => isSoloMode,
+    learned: () => aiLearned(), learnFrom: list => aiLearnFrom(list),
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
@@ -3403,6 +3494,7 @@ const Game = (() => {
         if (!isSoloMode || !state || !state.players[0]) return false;
         state.players[0].isAI = true; checkAITurn(); return true;
       },
+      bidPlan: (hand, bold) => aiBidPlan(hand, bold),
       term: () => hostTerm,
       isHost: () => Network.getIsHost(),
       hostPeerId: () => getHostPeerId(),

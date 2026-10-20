@@ -341,6 +341,21 @@ const Extras = (() => {
       if (sumEl) sumEl.textContent = sm.rounds
         ? `${sm.rounds} round${sm.rounds === 1 ? '' : 's'} saved since ${new Date(sm.since).toLocaleDateString()}. Your bids made: ${pct(sm.myMade, sm.myBids)} of ${sm.myBids}. Your team's bids made: ${pct(sm.teamMade, sm.teamBids)} of ${sm.teamBids}.`
         : 'No rounds saved yet.';
+      const lEl = document.getElementById('history-learned');
+      if (lEl && Game.learned) {
+        const L = Game.learned();
+        const line = (label, x, what) => {
+          if (!x || !x.n) return `${label}: no examples yet.`;
+          const rate = Math.round((100 * x.made) / x.n);
+          if (x.adopted) return `${label}: learned. People here made ${x.made} of ${x.n} (${rate}%), clearly above the ${Math.round(100 * x.need)}% needed to beat the bots' way, so bots now ${what}.`;
+          if (x.n < 15) return `${label}: ${x.n} example${x.n === 1 ? '' : 's'} so far (${rate}% made). Needs 15 before it can count.`;
+          return `${label}: not learned. ${x.made} of ${x.n} made (${rate}%); it has to be clearly above ${Math.round(100 * x.need)}% to beat the bots' way.`;
+        };
+        lEl.innerHTML = ['<b>What the bots learned here</b>',
+          line('Bolder bids (one above what a bot would bid)', L.bid, 'bid one level higher on hands like these'),
+          line('Raising to LS', L.ls, 'raise to LS one trick sooner'),
+          line('Raising to GS', L.gs, 'raise to GS one trick sooner')].join('<br>');
+      }
       const shareBtn = document.getElementById('history-share-btn');
       const clearBtn = document.getElementById('history-clear-btn');
       if (shareBtn) { shareBtn.disabled = !sm.rounds; shareBtn.onclick = () => History.share().catch(() => {}); }

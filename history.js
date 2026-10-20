@@ -10,10 +10,11 @@ const History = (() => {
   const PREF = 'nattis.history.on';
   const MAX = 300; // ~400 bytes a round → about 120 KB at most
 
-  const get = () => { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { return []; } };
-  const put = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); return true; } catch (_) { return false; } };
+  let ver = 1, cache = null;
+  const get = () => { if (cache) return cache; try { cache = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (_) { cache = []; } return cache; };
+  const put = list => { ver++; cache = null; try { localStorage.setItem(KEY, JSON.stringify(list)); return true; } catch (_) { return false; } };
   const getPref = () => { try { return localStorage.getItem(PREF) === 'off' ? 'off' : 'on'; } catch (_) { return 'on'; } };
-  const setPref = v => { try { localStorage.setItem(PREF, v === 'off' ? 'off' : 'on'); } catch (_) {} };
+  const setPref = v => { ver++; try { localStorage.setItem(PREF, v === 'off' ? 'off' : 'on'); } catch (_) {} };
 
   // A_spades → AS, 10_hearts → 10H, jokers → BJ / SJ
   function code(c) {
@@ -59,7 +60,7 @@ const History = (() => {
     const mode = Game.isSolo && Game.isSolo() ? 'solo' : 'online';
     const e = build(state, Game.getMySeat(), result || {}, mode);
     if (!e) { if (tries < 4) setTimeout(() => record(result, tries + 1), 700); return; }
-    const list = get();
+    const list = get().slice();
     const k = keyOf(e);
     if (list.some(x => keyOf(x) === k)) return; // same round shown again (rejoin)
     list.push(e);
@@ -103,5 +104,8 @@ const History = (() => {
 
   function clear() { put([]); }
 
-  return { record, get, summary, share, clear, getPref, setPref, _build: build };
+  // Storage written by another tab or a test: re-read on next use
+  window.addEventListener('storage', ev => { if (ev.key === KEY || ev.key === PREF) { cache = null; ver++; } });
+  const reload = () => { cache = null; ver++; };
+  return { record, get, summary, share, clear, getPref, setPref, version: () => ver, reload, _build: build };
 })();
