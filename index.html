@@ -31,7 +31,7 @@
   <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./style.css?v=38">
+  <link rel="stylesheet" href="./style.css?v=39">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -137,7 +137,8 @@
 
     <div id="lobby-seats"></div>
 
-    <button id="start-game-btn" class="btn btn-primary">Start Game</button>
+    <button id="start-game-btn" class="btn btn-primary" style="display:none">Start Game</button>
+    <button id="leave-lobby-btn" class="btn btn-secondary">Leave room</button>
   </div>
 
   <!-- GAME SCREEN -->
@@ -381,17 +382,17 @@
   </div>
 
   <!-- Scripts -->
-  <script src="./crypto.js?v=38"></script>
-  <script src="./engine.js?v=38"></script>
-  <script src="./network.js?v=38"></script>
-  <script src="./ui.js?v=38"></script>
-  <script src="./badges.js?v=38"></script>
-  <script src="./fx.js?v=38"></script>
-  <script src="./sound.js?v=38"></script>
-  <script src="./extras.js?v=38"></script>
-  <script src="./reel.js?v=38"></script>
-  <script src="./voice.js?v=38"></script>
-  <script src="./game.js?v=38"></script>
+  <script src="./crypto.js?v=39"></script>
+  <script src="./engine.js?v=39"></script>
+  <script src="./network.js?v=39"></script>
+  <script src="./ui.js?v=39"></script>
+  <script src="./badges.js?v=39"></script>
+  <script src="./fx.js?v=39"></script>
+  <script src="./sound.js?v=39"></script>
+  <script src="./extras.js?v=39"></script>
+  <script src="./reel.js?v=39"></script>
+  <script src="./voice.js?v=39"></script>
+  <script src="./game.js?v=39"></script>
   <script>
     // Service Worker registration
     if ('serviceWorker' in navigator) {

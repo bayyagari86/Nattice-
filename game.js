@@ -250,6 +250,7 @@ const Game = (() => {
   let reconnecting = null;       // in-flight reconnect promise
   let rejoinWaiter = null;
   let unloading = false; // set once the tab starts closing/refreshing
+  let leaving = false;   // set while we deliberately leave a room (never a host loss)
   let authorityWatch = null;
   let savedKnownPeers = [];
   let lastSessionSave = 0;
@@ -349,6 +350,8 @@ const Game = (() => {
       localStorage.setItem(SESSION_KEY, JSON.stringify({
         roomCode, playerId: myPlayerId, name: myName, secret: mySecret,
         seat: mySeat, hostTerm, knownPeers: knownRoomPeers(), savedAt: now,
+        phase: state ? state.phase : null, wasHost: Network.getIsHost(),
+        humans: state && state.players ? state.players.filter(p => p && !p.isAI).length : 0,
       }));
     } catch (_) { /* storage unavailable (private mode) — rejoin by code still works in-page */ }
   }
@@ -364,6 +367,9 @@ const Game = (() => {
       const s = JSON.parse(raw);
       if (!s || !s.roomCode || !s.playerId || !s.secret || !s.savedAt) return null;
       if (Date.now() - s.savedAt > SESSION_MAX_AGE_MS) { clearSession(); return null; }
+      // A room you hosted that nobody joined ends when your app closes:
+      // there is nothing to rejoin, so don't send you back to it.
+      if (s.phase === 'WAITING' && s.wasHost && (s.humans || 0) <= 1) { clearSession(); return null; }
       return s;
     } catch (_) { return null; }
   }
@@ -469,6 +475,7 @@ const Game = (() => {
   async function resumeSavedSession() {
     const s = getSavedSession();
     if (!s) throw new Error('No saved game to rejoin');
+    const gen = sessionGen;
     await initIdentity(s.name, s);
     roomCode = s.roomCode;
     hostTerm = s.hostTerm || 0;
@@ -480,9 +487,10 @@ const Game = (() => {
       wireNetwork();
       await Network.setRoom(roomCode);
       const ok = await reconnectToGame('resume-saved', { maxMs: 45000 });
+      if (gen !== sessionGen) throw new Error('cancelled');
       if (!ok) throw new Error('Could not rejoin — the game may have ended');
     } catch (e) {
-      cleanup();
+      if (gen === sessionGen) cleanup(); // never tear down a game started after Leave
       throw e;
     }
   }
@@ -648,7 +656,7 @@ const Game = (() => {
   }
 
   function onNetPeerLeave(peerId) {
-    if (!state || isSoloMode || unloading) return;
+    if (!state || isSoloMode || unloading || leaving) return;
     if (Network.getIsHost()) { hostHandlePeerLeave(peerId); return; }
     if (peerId !== currentHostPeerId) return;
     // Losing the host right after we resumed (or while hidden) almost always
@@ -801,11 +809,12 @@ const Game = (() => {
     console.log('[Game] Reconnecting to game:', reason);
     setBanner('rejoin', 'Reconnecting to the game…');
     const maxMs = opts.maxMs || 120000;
-    reconnecting = (async () => {
+    const gen = sessionGen;
+    const p = (async () => {
       const started = Date.now();
       let attempt = 0;
       let preferHost = opts.preferHost || null;
-      while (roomCode && Date.now() - started < maxMs) {
+      while (roomCode && gen === sessionGen && Date.now() - started < maxMs) {
         attempt++;
         try {
           if (!Network.isReady()) {
@@ -821,6 +830,7 @@ const Game = (() => {
           } else {
             target = await locateHost(roomCode, knownRoomPeers(), { fromTerm: hostTerm, timeoutMs: 10000 });
           }
+          if (gen !== sessionGen) return false; // left / started something else
           if (Network.getIsHost()) return true; // became host meanwhile
           if (target.hostPeerId === myPeerId) throw new Error('self-referential room info');
           await Network.connectToPeer(target.hostPeerId, 10000);
@@ -847,13 +857,14 @@ const Game = (() => {
         }
         await sleep(Math.min(8000, 1000 * Math.pow(2, attempt - 1)));
       }
-      if (roomCode) UI.showToast('Could not reconnect to the game');
+      if (roomCode && gen === sessionGen) UI.showToast('Could not reconnect to the game');
       return false;
     })().finally(() => {
-      reconnecting = null;
-      setBanner('rejoin', null);
+      if (reconnecting === p) reconnecting = null;
+      if (gen === sessionGen) setBanner('rejoin', null);
     });
-    return reconnecting;
+    reconnecting = p;
+    return p;
   }
 
   function onRejoinRejected(msg) {
@@ -994,6 +1005,7 @@ const Game = (() => {
   }
 
   function attemptHostMigration(departedPeerId, excluded = new Set()) {
+    if (leaving || unloading) return;
     if (Network.getIsHost() || !state || unloading) return;
     migrationInProgress = true;
     setBanner('migrate', 'Host left — handing off…');
@@ -1415,11 +1427,13 @@ const Game = (() => {
         UI.showToast(`${msg.name} reconnected!`);
         break;
       case 'HOST_CLOSED':
+        leaving = true;   // the host's channel closing next is expected, not a migration
         clearSession();
         UI.showToast('Host closed the game');
         setTimeout(() => { UI.showScreen('title-screen'); cleanup(); }, 2000);
         break;
       case 'KICKED':
+        leaving = true;
         clearSession();
         UI.showToast(msg.reason || 'You were removed by the host');
         setTimeout(() => { UI.showScreen('title-screen'); cleanup(); }, 2500);
@@ -1616,7 +1630,11 @@ const Game = (() => {
     if (raiseTimer) { clearTimeout(raiseTimer); raiseTimer = null; }
   }
 
+  let sessionGen = 0; // bumps on every teardown, so stale async work can tell it's been cancelled
   function cleanup() {
+    sessionGen++;
+    leaving = false;
+    reconnecting = null;
     clearTurnTimer();
     clearRaiseTimer();
     stopAuthorityWatch();
@@ -1654,12 +1672,25 @@ const Game = (() => {
     }
   }
 
+  // Host waited and nobody joined: close the room and start a bots game
+  function startAloneWithBots() {
+    const name = myName || 'Player';
+    clearSession();
+    cleanup();
+    UI.showScreen('game-screen');
+    Badges.reset();
+    UI.updatePointsDisplay();
+    UI.renderBadgesGrid();
+    UI.showToast('Playing with 5 bots');
+    startSoloGame(name);
+  }
+
   // Start the game (host only)
   function startGame() {
     if (!Network.getIsHost()) return;
     const playerCount = state.players.filter(Boolean).length;
-    if (playerCount < 2) { // Allow 2+ for testing, 6 for real
-      UI.showToast('Need at least 2 players to start');
+    if (playerCount < 2) { // nobody joined: close the room and play against bots
+      startAloneWithBots();
       return;
     }
 
@@ -3232,6 +3263,7 @@ const Game = (() => {
 
   // Explicit "Leave" — the player means it, so no auto-rejoin afterwards
   async function leaveGame() {
+    leaving = true;   // our own goodbye closes channels: don't read that as "host left"
     clearSession();
     if (!isSoloMode && state && Network.getPeerId()) {
       try {

@@ -136,6 +136,17 @@ const UI = (() => {
       document.getElementById('badges-panel').classList.remove('open');
     });
 
+    // Leave the room from the lobby (also cancels a rejoin in progress)
+    document.getElementById('leave-lobby-btn').addEventListener('click', () => {
+      const st = Game.getState && Game.getState();
+      const others = st && st.players ? st.players.filter((p, i) => p && !p.isAI && i !== Game.getMySeat()).length : 0;
+      const iHost = typeof Network !== 'undefined' && Network.getIsHost && Network.getIsHost();
+      if (others > 0 && !confirm(iHost ? 'Leave and close this room for everyone?' : 'Leave this room?')) return;
+      rejoinCancelled = true;
+      Game.leaveGame();
+      const rb = document.getElementById('rejoin-btn'); if (rb) rb.style.display = 'none';
+    });
+
     // Chat drawer toggle
     document.getElementById('chat-toggle-btn').addEventListener('click', () => {
       document.getElementById('chat-area').classList.add('open');
@@ -177,16 +188,23 @@ const UI = (() => {
     }
   }
 
-  let rejoinInFlight = false;
+  let rejoinInFlight = false, rejoinCancelled = false;
   function rejoinSaved() {
     if (rejoinInFlight) return;
     rejoinInFlight = true;
+    rejoinCancelled = false;
     const btn = document.getElementById('rejoin-btn');
     showScreen('lobby-screen');
-    document.getElementById('lobby-status').textContent = 'Rejoining your game...';
+    // Fresh lobby: nothing from a previous room, and only Leave is usable
+    document.getElementById('room-code-section').style.display = 'none';
+    document.getElementById('start-game-btn').style.display = 'none';
+    const wa = document.getElementById('wa-invite-btn'); if (wa) wa.style.display = 'none';
+    document.getElementById('lobby-seats').innerHTML = '';
+    document.getElementById('lobby-status').textContent = 'Rejoining your game\u2026 Tap Leave room to start over.';
     Game.resumeSavedSession()
       .then(() => { if (btn) btn.style.display = 'none'; })
       .catch(err => {
+        if (rejoinCancelled) return;
         showToast(err.message || 'Could not rejoin');
         Game.clearSession();
         if (btn) btn.style.display = 'none';
@@ -235,7 +253,8 @@ const UI = (() => {
         document.getElementById('room-code-section').style.display = 'flex';
         document.getElementById('lobby-status').textContent = 'Waiting for players...';
         document.getElementById('start-game-btn').style.display = 'block';
-        document.getElementById('start-game-btn').addEventListener('click', () => Game.startGame());
+        document.getElementById('start-game-btn').onclick = () => Game.startGame(); // onclick: hosting again never stacks handlers
+        try { updateLobby(Game.getState(), Game.getMySeat()); } catch (_) {}   // right label from the start
 
         // Generate QR code with room code only URL
         const qrContainer = document.getElementById('qr-code-container');
@@ -510,8 +529,9 @@ const UI = (() => {
     const startBtn = document.getElementById('start-game-btn');
     if (startBtn && iAmHost && state.phase === 'WAITING') {
       startBtn.style.display = 'block';
-      startBtn.textContent = humanCount >= 6 ? 'Starting...' : `Start Now (fill ${6 - humanCount} with bots)`;
-      startBtn.disabled = humanCount < 2;
+      startBtn.textContent = humanCount >= 6 ? 'Starting...'
+        : humanCount < 2 ? 'Play now with 5 bots' : `Start Now (fill ${6 - humanCount} with bots)`;
+      startBtn.disabled = false;
     }
 
     // Show host ID for sharing
