@@ -41,66 +41,51 @@ const Engine = (() => {
     return deck; // 54 cards
   }
 
-  function dealCards(deck) {
-    // 30% chance to deal competitive hands (long suits + high cards)
-    const isCompetitive = Math.random() < 0.3;
+  // Uniform random integer in [0, n) — crypto-grade when available
+  function randInt(n) {
+    try {
+      const g = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto : null;
+      if (g) { const a = new Uint32Array(1); g.getRandomValues(a); return a[0] % n; }
+    } catch (_) {}
+    return Math.floor(Math.random() * n);
+  }
+
+  // Deal 9 cards each from an already-shuffled deck.
+  // After the first rounds, some deals are "competitive": one player on EACH
+  // team (seat chosen at random, never a fixed seat) gets a long suit headed by
+  // A-K-Q, in two different suits, built in random order. Neither team — and
+  // no particular seat such as the host's — is favoured.
+  function dealCards(deck, opts = {}) {
+    deck = deck.slice();
     const hands = [[], [], [], [], [], []];
+    const round = opts.round || 1;
+    const warmup = opts.warmupRounds == null ? 2 : opts.warmupRounds;
+    const chance = opts.competitiveChance == null ? 0.3 : opts.competitiveChance;
+    const competitive = round > warmup && randInt(1000) < chance * 1000;
 
-    if (isCompetitive) {
-      // Give 2 players strong hands with long suits
-      const strongPlayers = [0, 3]; // One from each team
-      for (const seat of strongPlayers) {
-        // Pick a random suit for long suit
-        const baseSuits = ['spades', 'hearts', 'diamonds', 'clubs'];
-        const suit = baseSuits[Math.floor(Math.random() * baseSuits.length)];
-        // Give 5 cards of that suit including A, K
-        const suitCards = deck.filter(c => c.suit === suit);
-        const highCards = suitCards.filter(c => ['A', 'K', 'Q'].includes(c.rank));
-        const otherSuitCards = suitCards.filter(c => !['A', 'K', 'Q'].includes(c.rank));
-
-        // Add high cards first
-        highCards.forEach(c => {
-          const idx = deck.indexOf(c);
-          if (idx !== -1) {
-            hands[seat].push(c);
-            deck.splice(idx, 1);
-          }
-        });
-
-        // Add more of same suit
-        otherSuitCards.slice(0, 3).forEach(c => {
-          const idx = deck.indexOf(c);
-          if (idx !== -1) {
-            hands[seat].push(c);
-            deck.splice(idx, 1);
-          }
-        });
-
-        // Fill remaining slots with random cards
-        while (hands[seat].length < 9) {
-          const idx = Math.floor(Math.random() * deck.length);
-          hands[seat].push(deck[idx]);
-          deck.splice(idx, 1);
-        }
-      }
-
-      // Deal remaining cards to other players normally
-      for (let i = 0; i < 6; i++) {
-        if (!strongPlayers.includes(i)) {
-          while (hands[i].length < 9) {
-            const idx = Math.floor(Math.random() * deck.length);
-            hands[i].push(deck[idx]);
-            deck.splice(idx, 1);
-          }
-        }
+    if (competitive) {
+      const teamA = [0, 2, 4], teamB = [1, 3, 5];
+      const strong = [teamA[randInt(3)], teamB[randInt(3)]];
+      if (randInt(2)) strong.reverse();
+      const suits = ['spades', 'hearts', 'diamonds', 'clubs'];
+      const s1 = suits.splice(randInt(4), 1)[0], s2 = suits[randInt(3)];
+      [s1, s2].forEach((suit, k) => {
+        const seat = strong[k];
+        const take = id => { const i = deck.findIndex(c => c.id === id); if (i !== -1) hands[seat].push(deck.splice(i, 1)[0]); };
+        ['A', 'K', 'Q'].forEach(rk => take(`${rk}_${suit}`));
+        // two more of the suit, random ranks
+        const rest = deck.filter(c => c.suit === suit);
+        for (let j = 0; j < 2 && rest.length; j++) take(rest.splice(randInt(rest.length), 1)[0].id);
+      });
+      // Everything else in shuffled order, round-robin to whoever still needs cards
+      let i = 0;
+      while (deck.length) {
+        const seat = i % 6; i++;
+        if (hands[seat].length < 9) hands[seat].push(deck.shift());
       }
     } else {
-      // Normal dealing: round-robin
-      for (let i = 0; i < 54; i++) {
-        hands[i % 6].push(deck[i]);
-      }
+      for (let i = 0; i < 54; i++) hands[i % 6].push(deck[i]);
     }
-
     return hands;
   }
 

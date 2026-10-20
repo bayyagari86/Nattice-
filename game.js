@@ -1744,7 +1744,7 @@ const Game = (() => {
     // Create and shuffle deck
     const deck = Engine.createDeck();
     const shuffled = GameCrypto.secureShuffleDeck(deck);
-    const hands = Engine.dealCards(shuffled);
+    const hands = Engine.dealCards(shuffled, { round: (state.roundHistory || []).length + 1 });
 
     state.phase = 'BIDDING';
     state.currentRound = {
@@ -2595,6 +2595,89 @@ const Game = (() => {
     return null;
   }
 
+  // ===== JOKER PLAY (only what's been played and bid is used — no peeking) =====
+  // Where is an unseen joker likely to be? Each other seat that could still hold
+  // it gets a weight; the round's bidder (and anyone who bid 7+) is likelier to
+  // hold the Big Joker, since it's the strongest reason to bid.
+  function aiJokerOdds(seat, jokerId, amongSeats) {
+    if (aiSeen().has(jokerId) || (state.hands[seat] || []).some(c => c.id === jokerId)) return 0;
+    const r = state.currentRound;
+    const hi = {};
+    for (const b of (r.bids || [])) if (b.bid) hi[b.seat] = Math.max(hi[b.seat] || 0, b.bid);
+    const w = s => {
+      if (s === seat) return 0;
+      if ((state.hands[s] || []).length === 0) return 0;
+      let x = 1;
+      if (jokerId === 'BIG_JOKER') { if (s === r.bidder) x += 1.5; else if ((hi[s] || 0) >= 7) x += 0.75; }
+      return x;
+    };
+    const all = [0, 1, 2, 3, 4, 5].reduce((a, s) => a + w(s), 0);
+    if (!all) return 0;
+    return amongSeats.reduce((a, s) => a + w(s), 0) / all;
+  }
+
+  // Decide joker use when following. Returns a joker card to play, null to keep
+  // the jokers this trick, or undefined to fall back to the older rules
+  // (used by the A/B test hook only).
+  function aiJokerChoice(seat, x) {
+    if (typeof window !== 'undefined' && window.__aiLegacyTeam && window.__aiLegacyTeam === Engine.getTeam(seat)) return undefined;
+    const { hand, playable, trick, trump, leadSuit, myTeam, oppAfter, important, opponentWinning, currentWinCard } = x;
+    const big = playable.find(c => c.id === 'BIG_JOKER'), small = playable.find(c => c.id === 'SMALL_JOKER');
+    if (!big && !small) return null;
+    const r = state.currentRound;
+    const played = aiSeen();
+    const wins = c => Engine.determineTrickWinnerRefined([...trick, { playerIndex: seat, card: c }], trump) === seat;
+    const hasTrumpSuit = trump && trump !== 'notrump';
+    // Could someone still to play take a trick I win with card c?
+    const canRuff = s => hasTrumpSuit && leadSuit && leadSuit !== trump && aiIsVoid(s, leadSuit) && !aiIsVoid(s, trump);
+    const bigRisk = aiJokerOdds(seat, 'BIG_JOKER', oppAfter);
+    const holds = c => {
+      if (!oppAfter.length) return true;
+      if (c.id === 'BIG_JOKER') return true;
+      if (bigRisk > 0) return false;
+      if (c.id === 'SMALL_JOKER') return !oppAfter.some(canRuff) && !(hasTrumpSuit && leadSuit === trump);
+      if (hasTrumpSuit && c.suit === trump) return aiHigherTrumpsOut(trump, c.rank, hand, played) === 0;
+      const sjOut = aiJokerOdds(seat, 'SMALL_JOKER', oppAfter) > 0;
+      return !sjOut && c.suit === leadSuit && aiIsMasterInSuit(c, hand) && !oppAfter.some(canRuff);
+    };
+    const sureCheap = playable.some(c => c.suit !== 'joker' && wins(c) && holds(c));
+    if (sureCheap) return null; // a plain card already takes it
+
+    // 1. Partner signal: my partner bid, hasn't been leading trumps, and the
+    //    raise decision (after 5 tricks) is still ahead. Show the Big Joker on a
+    //    trick the other side is winning so the bidder knows it's with us.
+    const bidder = r.bidder;
+    if (big && bidder >= 0 && bidder !== seat && Engine.getTeam(bidder) === myTeam &&
+        r.tricksPlayed < 5 && !r.raised && opponentWinning) {
+      const bidderLedTrump = hasTrumpSuit && [...(r.tricks || []), { cards: trick }].some(t =>
+        t.cards && t.cards[0] && t.cards[0].playerIndex === bidder && t.cards[0].card.suit === trump);
+      if (!bidderLedTrump) { aiMemory.signalled = aiMemory.signalled || {}; aiMemory.signalled[seat] = true; return big; }
+    }
+
+    if (!important) return null; // the contract is settled: no need to spend a joker
+
+    // 2. Small Joker first: it only gets weaker as players run out of suits and
+    //    can trump it. Use it while it's likely to hold and the other side is winning.
+    if (small && opponentWinning && wins(small)) {
+      const ruffRisk = oppAfter.some(canRuff);
+      const smallBigRisk = aiJokerOdds(seat, 'BIG_JOKER', oppAfter);
+      if (!ruffRisk && smallBigRisk <= 0.3) return small;
+    }
+
+    // 3. Big Joker: it wins any one trick whenever it's played, so holding it
+    //    gains nothing — use it on a trick the other side would otherwise take.
+    //    Wait only when a partner still to play could win it cheaply (the
+    //    winning card isn't a trump or a joker and the lead is a side suit).
+    if (big && opponentWinning) {
+      const partnerAfter = [];
+      for (let i = 1; i < 6 - trick.length; i++) { const s = (seat + i) % 6; if (Engine.getTeam(s) === myTeam) partnerAfter.push(s); }
+      const hardToBeat = !currentWinCard || currentWinCard.suit === 'joker' || (hasTrumpSuit && currentWinCard.suit === trump) ||
+        aiIsMasterInSuit(currentWinCard, hand);
+      if (!partnerAfter.length || hardToBeat) return big;
+    }
+    return null;
+  }
+
   function aiPlayCard(seat) {
     const hand = state.hands[seat];
     if (hand.length === 0) return;
@@ -2710,6 +2793,19 @@ const Game = (() => {
         : null;
       chosen = myMaster || getDumpCard(playable, trump, leadSuit);
 
+    } else if ((() => {
+      const jc = aiJokerChoice(seat, { hand, playable, trick, trump, leadSuit, myTeam, oppAfter: opponentSeatsAfter,
+        important, opponentWinning, currentWinCard });
+      if (jc === undefined) return false;          // A/B hook: old rules
+      if (jc) { chosen = jc; return true; }
+      // keep the jokers this trick: cheapest plain winner, else a cheap discard
+      const plain = playable.filter(c => c.suit !== 'joker');
+      if (!plain.length) return false;
+      const plainWins = plain.filter(c => Engine.determineTrickWinnerRefined([...trick, { playerIndex: seat, card: c }], trump) === seat);
+      chosen = plainWins.length ? chooseWin(plainWins) : getDumpCard(plain, trump, leadSuit);
+      return true;
+    })()) {
+      // joker decision made above
     } else {
       // Need to contest or win this trick
       // --- BIG JOKER STRATEGY ---
