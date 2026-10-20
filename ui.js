@@ -125,6 +125,7 @@ const UI = (() => {
 
     setupRejoin(qrRoom || auto === 'true');
 
+    initProfile();
     document.getElementById('solo-btn').addEventListener('click', startSoloGame);
     document.getElementById('host-btn').addEventListener('click', showHostDialog);
     document.getElementById('join-btn').addEventListener('click', showJoinDialog);
@@ -231,8 +232,51 @@ const UI = (() => {
     }
   }
 
+  // === PROFILE: your name is asked once, saved on this phone, and reused for every game ===
+  const LS_PROFILE = 'nattis.profile';
+  function getProfile() {
+    try { const p = JSON.parse(localStorage.getItem(LS_PROFILE) || 'null'); return p && p.name ? p : null; } catch (e) { return null; }
+  }
+  function saveProfileName(name) {
+    const n = String(name || '').trim().slice(0, 20);
+    if (!n) return null;
+    const p = Object.assign({}, getProfile() || {}, { name: n, updated: Date.now() });
+    try { localStorage.setItem(LS_PROFILE, JSON.stringify(p)); } catch (e) {}
+    refreshProfileUI();
+    return n;
+  }
+  function refreshProfileUI() {
+    const p = getProfile();
+    const chip = document.getElementById('profile-chip');
+    if (chip) {
+      chip.style.display = p ? '' : 'none';
+      if (p) chip.innerHTML = `<span class="pc-avatar">${escapeHtml(p.name.trim().charAt(0).toUpperCase())}</span><span>Playing as <b>${escapeHtml(p.name)}</b></span><span class="pc-edit">Change</span>`;
+    }
+    const inp = document.getElementById('profile-name');
+    if (inp && document.activeElement !== inp) inp.value = p ? p.name : '';
+  }
+  function editProfile() {
+    const p = getProfile();
+    showInputDialog('Your name', 'Player', (name) => { saveProfileName(name); showToast(`Saved — you're ${getProfile().name}`); }, p ? p.name : '');
+  }
+  // Runs cb(name) straight away when a profile exists; asks once otherwise and saves the answer.
+  function withProfileName(cb) {
+    const p = getProfile();
+    if (p) { cb(p.name); return; }
+    showInputDialog('What should we call you?', 'Player', (name) => {
+      cb(saveProfileName(name) || name);
+    }, '', 'Saved on this phone — you won\'t be asked again. Change it any time from your name on the home screen.');
+  }
+  function initProfile() {
+    document.getElementById('profile-chip')?.addEventListener('click', editProfile);
+    const save = () => { const v = document.getElementById('profile-name')?.value; if (saveProfileName(v)) showToast('Name saved'); };
+    document.getElementById('profile-save')?.addEventListener('click', save);
+    document.getElementById('profile-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    refreshProfileUI();
+  }
+
   function startSoloGame() {
-    showInputDialog('Enter your name', 'Player', (name) => {
+    withProfileName((name) => {
       showScreen('game-screen');
       Badges.reset();
       updatePointsDisplay();
@@ -243,7 +287,7 @@ const UI = (() => {
 
   // === TITLE SCREEN ===
   function showHostDialog() {
-    showInputDialog('Enter your name', 'Host', (name) => {
+    withProfileName((name) => {
       showScreen('lobby-screen');
       document.getElementById('lobby-status').textContent = 'Creating room...';
       Game.hostGame(name).then(roomCode => {
@@ -298,28 +342,36 @@ const UI = (() => {
   }
 
   function showJoinDialog(prefillRoom = '') {
-    showMultiInputDialog([
-      { label: 'Your Name', placeholder: 'Player', key: 'name', value: '' },
-      { label: 'Room Code', placeholder: 'ABC123', key: 'code', value: prefillRoom },
-    ], (vals) => {
-      if (!vals.name || !vals.code) { showToast('Name and Room Code required'); return; }
+    if (typeof prefillRoom !== 'string') prefillRoom = ''; // button clicks pass an event
+    const prof = getProfile();
+    const go = (name, code) => {
       showScreen('lobby-screen');
       document.getElementById('lobby-status').textContent = 'Joining room...';
-      Game.joinGame(vals.name.trim(), vals.code.trim().toUpperCase()).catch(err => {
+      Game.joinGame(name, code.trim().toUpperCase()).catch(err => {
         showToast('Failed to join: ' + err.message);
         showScreen('title-screen');
       });
+    };
+    if (prof && prefillRoom) { go(prof.name, prefillRoom); return; } // invite link + saved profile: straight in
+    const fields = prof ? [] : [{ label: 'Your Name', placeholder: 'Player', key: 'name', value: '' }];
+    fields.push({ label: 'Room Code', placeholder: 'ABC123', key: 'code', value: prefillRoom });
+    showMultiInputDialog(fields, (vals) => {
+      if (prof) vals.name = prof.name;
+      if (!vals.name || !vals.code) { showToast('Name and Room Code required'); return; }
+      saveProfileName(vals.name);
+      go(vals.name.trim(), vals.code);
     });
   }
 
   // === INPUT DIALOGS (PWA-friendly, no prompt()) ===
-  function showInputDialog(label, placeholder, callback) {
+  function showInputDialog(label, placeholder, callback, initial = '', note = '') {
     const overlay = document.getElementById('input-overlay');
     overlay.style.display = 'flex';
     overlay.innerHTML = `
       <div class="input-dialog">
         <label>${label}</label>
-        <input type="text" id="dialog-input" placeholder="${placeholder}" autocomplete="off" maxlength="20">
+        <input type="text" id="dialog-input" placeholder="${placeholder}" autocomplete="off" maxlength="20" value="${escapeHtml(initial)}">
+        ${note ? `<p class="dialog-note">${escapeHtml(note)}</p>` : ''}
         <div class="dialog-btns">
           <button class="bid-btn pass-btn" id="dialog-cancel">Cancel</button>
           <button class="bid-btn" id="dialog-ok" style="background:var(--accent-gold);color:#000">OK</button>
@@ -1293,16 +1345,20 @@ const UI = (() => {
     const me = Game.getMySeat();
     const team = Engine.getTeamPlayers(r.biddingTeam);
     let total = 0;
+    const selEl = document.getElementById('my-commitment');
+    const bidderPreview = me === r.bidder && selEl; // the bidder sees their pick counted before committing
     const rows = team.map(st => {
-      const has = Object.prototype.hasOwnProperty.call(commits, st);
-      const n = has ? (+commits[st] || 0) : 0;
+      const preview = bidderPreview && st === me;
+      const has = preview || Object.prototype.hasOwnProperty.call(commits, st);
+      const n = preview ? (+selEl.value || 0) : has ? (+commits[st] || 0) : 0;
       total += n;
       const name = st === me ? 'You' : (state.players[st]?.name || `Player ${st + 1}`);
       const tag = st === r.bidder ? ' (bidder)' : '';
       return `<div class="commitment-item${has ? '' : ' pending'}"><span>${escapeHtml(name)}${tag}</span><b>${has ? '+' + n : '…'}</b></div>`;
     }).join('');
     const reach = Math.min(9, won + total);
-    const slam = reach >= 9 && won >= 5 ? 'GS (9)' : reach >= 8 ? 'LS (8)' : null;
+    let slam = reach >= 9 && won >= 5 ? 'GS (9)' : reach >= 8 ? 'LS (8)' : null;
+    if (bidderPreview) { const pl = raisePlan(state, +selEl.value || 0); slam = pl === 9 ? 'GS (9)' : pl === 8 ? 'LS (8)' : null; }
     box.innerHTML = `${rows}<div class="commitment-total">Won ${won} + committed ${total} = ${reach}${slam ? ` → ${slam}` : ' — not enough for LS'}</div>`;
     document.querySelectorAll('#raise-buttons [data-raise]').forEach(btn => {
       const b = +btn.dataset.raise;
@@ -1311,8 +1367,27 @@ const UI = (() => {
     const mine = Object.prototype.hasOwnProperty.call(commits, me);
     const sel = document.getElementById('my-commitment');
     const cb = document.getElementById('commit-btn');
-    if (cb) cb.textContent = mine ? 'Update' : 'Commit';
-    if (sel && mine && document.activeElement !== sel) sel.value = String(+commits[me] || 0);
+    if (sel && mine && me !== r.bidder && document.activeElement !== sel) sel.value = String(+commits[me] || 0);
+    if (cb && me === r.bidder) {
+      // The bidder's Commit is the decision: raise to the slam the team's total reaches, else no raise
+      const plan = raisePlan(state, sel ? +sel.value || 0 : 0);
+      cb.textContent = plan ? `Commit → raise to ${plan} (${plan === 9 ? 'GS' : 'LS'})` : 'Commit → no raise';
+    } else if (cb) {
+      cb.textContent = mine ? 'Update' : 'Commit';
+      const note = document.getElementById('commit-note');
+      if (note) note.textContent = mine ? `✓ You committed +${+commits[me] || 0}. ${(state.players[r.bidder]?.name || 'The bidder')} decides the raise…` : '';
+    }
+  }
+
+  // Slam the bidding team reaches if the bidder commits `mine` more tricks: 9, 8 or 0
+  function raisePlan(state, mine) {
+    const r = state.currentRound, me = Game.getMySeat();
+    const won = r.tricksTaken[r.biddingTeam] || 0;
+    const others = Object.entries(r.raiseCommitments || {}).filter(([s]) => +s !== me).reduce((a, [, n]) => a + (+n || 0), 0);
+    const reach = won + others + (+mine || 0);
+    if (reach >= 9 && Engine.isValidBid(9, r.bid, 'RAISE_CHECK', state)) return 9;
+    if (reach >= 8 && Engine.isValidBid(8, r.bid, 'RAISE_CHECK', state)) return 8;
+    return 0;
   }
 
   function showRaisePrompt(state) {
@@ -1355,6 +1430,7 @@ const UI = (() => {
         </select>
         <button class="bid-btn" id="commit-btn" style="padding:8px 16px;font-size:12px;">Commit</button>
       </div>
+      <div class="commit-note" id="commit-note" aria-live="polite"></div>
       <button class="bid-btn" id="extend-timer-btn" style="padding:6px 12px;font-size:11px;margin-top:8px;">+10s</button>
       ${isBidder ? '<div class="bid-buttons" id="raise-buttons"></div>' : '<div class="raise-waiting">Waiting for bidder to decide...</div>'}
     `;
@@ -1372,9 +1448,22 @@ const UI = (() => {
 
     // Wire up commitment button
     document.getElementById('commit-btn')?.addEventListener('click', () => {
-      const tricks = parseInt(document.getElementById('my-commitment').value);
+      const tricks = parseInt(document.getElementById('my-commitment').value) || 0;
+      const st = Game.getState();
+      if (st && Game.getMySeat() === st.currentRound.bidder) {
+        // Bidder: commit, then act on the team total right away
+        const plan = raisePlan(st, tricks);
+        Game.commitRaiseTricks(tricks);
+        panel.style.display = 'none';
+        if (plan) { showToast(`Raised to ${plan} (${plan === 9 ? 'Grand Slam' : 'Little Slam'})`); Game.raiseBid(plan); }
+        else { showToast('Team total is short of a slam — no raise'); Game.noRaise(); }
+        return;
+      }
       Game.commitRaiseTricks(tricks);
+      const note = document.getElementById('commit-note');
+      if (note) note.textContent = `✓ You committed +${tricks}. ${(st && st.players[st.currentRound.bidder]?.name) || 'The bidder'} decides the raise…`;
     });
+    document.getElementById('my-commitment')?.addEventListener('change', () => refreshRaiseCommitments(Game.getState()));
     
     // Wire up extend timer button
     document.getElementById('extend-timer-btn')?.addEventListener('click', () => {
@@ -1426,6 +1515,9 @@ const UI = (() => {
       const made = (result.tricksTaken[result.biddingTeam] || 0) >= result.bid;
       Sound.host(made ? 'bid_made' : 'bid_broken');
     }
+    // Random celebration when your team wins the round (the game-over screen does its own)
+    const gameEnds = result.totalScores && Math.max(result.totalScores.A || 0, result.totalScores.B || 0) >= (Engine.TARGET_SCORE || 62);
+    if (won && !gameEnds && typeof Celebrate !== 'undefined') setTimeout(() => Celebrate.play({ big: !!(result.gs || result.ls) }), 250);
     let title = won ? 'Round Won!' : 'Round Lost';
     if (result.gs) title = won ? 'GRAND SLAM!' : 'Grand Slam by Opponents!';
     if (result.ls) title = won ? 'LITTLE SLAM!' : 'Little Slam by Opponents!';
@@ -1475,6 +1567,7 @@ const UI = (() => {
     const myTeam = Game.getMyTeam();
     const won = winner === myTeam;
     if (typeof Sound !== 'undefined') setTimeout(() => Sound.host(won ? 'game_won' : 'game_lost'), 1200);
+    if (won && typeof Celebrate !== 'undefined') setTimeout(() => Celebrate.play({ big: true }), 250);
 
     overlay.innerHTML = `
       <div class="result-card ${won ? 'won' : 'lost'} game-over">

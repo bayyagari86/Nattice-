@@ -31,7 +31,7 @@
   <meta name="apple-mobile-web-app-title" content="Nattis">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
 
-  <link rel="stylesheet" href="./style.css?v=43">
+  <link rel="stylesheet" href="./style.css?v=44">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
@@ -99,6 +99,7 @@
       </div>
 
       <div class="title-actions">
+        <button id="profile-chip" class="profile-chip" type="button" style="display:none"></button>
         <button id="solo-btn" class="btn btn-primary">Play vs Computer</button>
         <div class="mode-divider"><span>or play online</span></div>
         <button id="host-btn" class="btn btn-secondary">Host a Game</button>
@@ -260,6 +261,12 @@
   <div id="theme-overlay">
     <div class="theme-card">
       <div class="theme-head"><h2>Table &amp; bots</h2><button class="theme-close" id="theme-close" aria-label="Close">&times;</button></div>
+      <h3>Your profile</h3>
+      <div class="profile-row">
+        <input class="friend-input" id="profile-name" maxlength="20" placeholder="Your name" autocomplete="nickname">
+        <button class="btn btn-secondary" id="profile-save">Save</button>
+      </div>
+      <p class="theme-note">Saved on this phone. Every new game uses this name, so you're never asked again.</p>
       <h3>Sound</h3>
       <div class="seg-group" id="sfx-options"></div>
       <h3>Table host voice</h3>
@@ -391,18 +398,19 @@
   </div>
 
   <!-- Scripts -->
-  <script src="./crypto.js?v=43"></script>
-  <script src="./engine.js?v=43"></script>
-  <script src="./network.js?v=43"></script>
-  <script src="./ui.js?v=43"></script>
-  <script src="./badges.js?v=43"></script>
-  <script src="./fx.js?v=43"></script>
-  <script src="./sound.js?v=43"></script>
-  <script src="./extras.js?v=43"></script>
-  <script src="./reel.js?v=43"></script>
-  <script src="./voice.js?v=43"></script>
-  <script src="./history.js?v=43"></script>
-  <script src="./game.js?v=43"></script>
+  <script src="./crypto.js?v=44"></script>
+  <script src="./engine.js?v=44"></script>
+  <script src="./network.js?v=44"></script>
+  <script src="./ui.js?v=44"></script>
+  <script src="./badges.js?v=44"></script>
+  <script src="./fx.js?v=44"></script>
+  <script src="./celebrate.js?v=44"></script>
+  <script src="./sound.js?v=44"></script>
+  <script src="./extras.js?v=44"></script>
+  <script src="./reel.js?v=44"></script>
+  <script src="./voice.js?v=44"></script>
+  <script src="./history.js?v=44"></script>
+  <script src="./game.js?v=44"></script>
   <script>
     // Service Worker registration
     if ('serviceWorker' in navigator) {
