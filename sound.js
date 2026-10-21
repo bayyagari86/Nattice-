@@ -172,7 +172,7 @@ const Sound = (() => {
 
   // ---------- Reactions ----------
   // entry = { id, entrance, mood } from the Extras catalogue
-  // Each seat has its own voice (a = Fenrir, b = Leda, c = Puck), so the table sounds like different people.
+  // Each seat has its own voice (a = Kore, b = Puck, c = Autonoe), so the table sounds like different people.
   function voiceFor(seat) { return 'abc'[((Number.isInteger(seat) ? seat : 0) % 3 + 3) % 3]; }
   function reaction(entry, seat) {
     if (!entry || getSfx() === 'off') return;
