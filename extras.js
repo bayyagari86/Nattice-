@@ -327,6 +327,8 @@ const Extras = (() => {
         Sound.getSfx(), Sound.setSfx, v => { if (v !== 'off') Sound.sting('celebrate'); });
       seg('host-options', [['or', 'ଓଡ଼ିଆ', 'Odia host'], ['en', 'English', 'English host'], ['off', 'Off', 'No host']],
         Sound.getHost(), Sound.setHost, v => { if (v !== 'off') Sound.host('trump_hearts'); });
+      seg('host-voice-options', [['f', 'Female', 'Kore'], ['m', 'Male', 'Sadachbia']], Sound.getHostVoice(), Sound.setHostVoice,
+        () => { if (Sound.getHost() !== 'off') Sound.host('joker_big'); });
       seg('talk-options', [['on', 'On', 'Bots chatter'], ['off', 'Off', 'Quiet bots']], Sound.getTalk(), Sound.setTalk);
     }
     const hEl = document.getElementById('history-options');
@@ -559,7 +561,7 @@ const Extras = (() => {
     const duration = style === 'festival' ? 3.6
       : entry && ENTRANCES[entry.entrance] ? ENTRANCES[entry.entrance]
       : (1.9 + Math.random() * 1.3); // varied timing
-    if (entry && !opts.silent && typeof Sound !== 'undefined') Sound.reaction(entry, opts.seat);
+    if (entry && !opts.silent && typeof Sound !== 'undefined') Sound.reaction(entry, opts.seat, { name: opts.realName, voice: opts.voice, isAI: opts.isAI });
     // Split words so the gradient never swallows colour emoji; 'wave' animates word by word.
     const parts = String(phrase).split(EMOJI_RE).filter(Boolean);
     let wordIdx = 0;

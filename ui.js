@@ -254,6 +254,23 @@ const UI = (() => {
     }
     const inp = document.getElementById('profile-name');
     if (inp && document.activeElement !== inp) inp.value = p ? p.name : '';
+    const pv = document.getElementById('profile-voice');
+    if (pv) {
+      const cur = (p && p.voice) || '';
+      pv.innerHTML = [['m', 'Male voice', 'Your reactions'], ['f', 'Female voice', 'Your reactions'], ['', 'Auto', 'Game picks']]
+        .map(([k, l, sub]) => `<button class="seg-opt ${cur === k ? 'selected' : ''}" data-pv="${k}"><b>${l}</b><small>${sub}</small></button>`).join('');
+      pv.querySelectorAll('.seg-opt').forEach(b => b.onclick = () => {
+        const prof = getProfile() || { name: '' };
+        prof.voice = b.dataset.pv;
+        try { localStorage.setItem(LS_PROFILE, JSON.stringify(prof)); } catch (e) {}
+        refreshProfileUI();
+        // Hear it straight away, and use it for your seat in the current game
+        const st = typeof Game !== 'undefined' && Game.getState && Game.getState();
+        const me = typeof Game !== 'undefined' && Game.getMySeat ? Game.getMySeat() : 0;
+        if (st && st.players && st.players[me]) st.players[me].voice = prof.voice;
+        if (typeof Sound !== 'undefined' && Sound.getSfx() === 'voice') { Sound.unlock(); Sound.reaction({ id: 'o3', mood: 'celebrate' }, me, { voice: prof.voice, name: prof.name }); }
+      });
+    }
   }
   function editProfile() {
     const p = getProfile();
@@ -1607,7 +1624,7 @@ const UI = (() => {
     if (typeof Extras !== 'undefined') {
       const st = Game.getState && Game.getState();
       const p = st && st.players && seat != null ? st.players[seat] : null;
-      Extras.showReaction(emoji, p ? { name: seat === Game.getMySeat() ? 'You' : p.name, team: Engine.getTeam(seat), seat } : {});
+      Extras.showReaction(emoji, p ? { name: seat === Game.getMySeat() ? 'You' : p.name, team: Engine.getTeam(seat), seat, voice: p.voice, isAI: !!p.isAI, realName: p.name } : {});
       return;
     }
     const centerEl = document.getElementById('center-emoji');

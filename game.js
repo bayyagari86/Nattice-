@@ -122,7 +122,7 @@ const Game = (() => {
     state = Engine.createGameState();
 
     // Seat player at 0, AI at 1-5
-    state.players[0] = { id: myPlayerId, name: myName, seat: 0, peerId: null, connected: true, isAI: false };
+    state.players[0] = { id: myPlayerId, name: myName, seat: 0, peerId: null, connected: true, isAI: false, voice: myVoicePref() };
     const botNames = pickBotNames(5, [myName]);
     for (let i = 1; i < 6; i++) {
       state.players[i] = {
@@ -374,6 +374,10 @@ const Game = (() => {
     } catch (_) { return null; }
   }
 
+  // Your chosen table voice from your profile: 'f' (female), 'm' (male) or '' (let the game pick)
+  function myVoicePref() {
+    try { const v = (JSON.parse(localStorage.getItem('nattis.profile') || 'null') || {}).voice; return v === 'f' || v === 'm' ? v : ''; } catch (_) { return ''; }
+  }
   async function initIdentity(name, existing = null) {
     myName = name;
     if (existing) {
@@ -430,7 +434,7 @@ const Game = (() => {
     mySeat = 0;
     state.players[0] = {
       id: myPlayerId, name: myName, seat: 0, peerId: myPeerId,
-      connected: true, tokenHash: myTokenHash,
+      connected: true, tokenHash: myTokenHash, voice: myVoicePref(),
     };
     peerToSeat.set(myPeerId, 0);
     seatToPeer.set(0, myPeerId);
@@ -462,7 +466,7 @@ const Game = (() => {
       dropProbeConnections(info.hostPeerId);
       console.log('[Game] Joining room', code, '→ host', info.hostPeerId, 'term', info.term);
       send(info.hostPeerId, {
-        type: 'JOIN_REQUEST', name: myName, playerId: myPlayerId,
+        type: 'JOIN_REQUEST', name: myName, playerId: myPlayerId, voice: myVoicePref(),
         peerId: myPeerId, tokenHash: myTokenHash, protocol: PROTOCOL_VERSION,
       });
     } catch (e) {
@@ -1504,6 +1508,7 @@ const Game = (() => {
     state.players[seat] = {
       id: msg.playerId, name: String(msg.name || 'Player').slice(0, 20), seat,
       peerId: fromPeer, connected: true, tokenHash: msg.tokenHash,
+      voice: msg.voice === 'f' || msg.voice === 'm' ? msg.voice : '',
     };
     peerToSeat.set(fromPeer, seat);
     seatToPeer.set(seat, fromPeer);

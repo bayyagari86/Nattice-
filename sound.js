@@ -15,6 +15,9 @@ const Sound = (() => {
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} };
   const getSfx = () => { const v = lsGet(LS_SFX, 'voice'); return ['voice', 'music', 'off'].includes(v) ? v : 'voice'; };
+  const LS_HOSTV = 'nattis.hostVoice'; // 'f' (Kore) | 'm' (Sadachbia)
+  const getHostVoice = () => (lsGet(LS_HOSTV, 'f') === 'm' ? 'm' : 'f');
+  const hostFile = (lang, event) => `${BASE}${getHostVoice() === 'm' ? 'hostm' : 'host'}_${lang}_${event}.mp3`;
   const getHost = () => { const v = lsGet(LS_HOST, 'or'); return ['or', 'en', 'off'].includes(v) ? v : 'or'; };
   const getTalk = () => lsGet(LS_TALK, 'on') === 'off' ? 'off' : 'on';
 
@@ -172,16 +175,32 @@ const Sound = (() => {
 
   // ---------- Reactions ----------
   // entry = { id, entrance, mood } from the Extras catalogue
-  // Each seat has its own voice (a = Kore, b = Puck, c = Autonoe), so the table sounds like different people.
-  function voiceFor(seat) { return 'abc'[((Number.isInteger(seat) ? seat : 0) % 3 + 3) % 3]; }
-  function reaction(entry, seat) {
+  // Table voices: female a = Kore, c = Autonoe; male b = Puck, d = Fenrir.
+  // Gender comes from the player's profile choice, else the bot's name (bot nicknames are mostly male),
+  // else the seat. Within a gender, seats alternate so teammates don't sound the same.
+  const FEMALE_NAMES = new Set(['priya', 'meera', 'kiran', 'lipi', 'rani', 'mami', 'nani', 'didi', 'apa', 'bou', 'mausi', 'aai',
+    'jhili', 'pinky', 'sonali', 'priyanka', 'puja', 'pooja', 'anita', 'sunita', 'rina', 'mina', 'lili', 'asha', 'sita', 'gita',
+    'mamata', 'smita', 'swati', 'sneha', 'neha', 'ritu', 'rupa', 'lata', 'usha', 'jyoti', 'mili', 'tuni', 'bunu', 'baby', 'chhabi']);
+  function genderFor(seat, info = {}) {
+    if (info.voice === 'f' || info.voice === 'm') return info.voice;
+    const n = String(info.name || '').trim().toLowerCase();
+    if (n && FEMALE_NAMES.has(n)) return 'f';
+    if (info.isAI) return 'm';
+    return Number.isInteger(seat) && seat % 3 === 1 ? 'f' : 'm'; // unknown humans: a mix around the table
+  }
+  function voiceFor(seat, info = {}) {
+    const s = Number.isInteger(seat) ? seat : 0;
+    const alt = Math.floor(s / 2) % 2; // seats 0,1→0  2,3→1  4,5→0
+    return genderFor(seat, info) === 'f' ? (alt ? 'c' : 'a') : (alt ? 'd' : 'b');
+  }
+  function reaction(entry, seat, info = {}) {
     if (!entry || getSfx() === 'off') return;
     unlock();
     const special = entry.entrance === 'drumroll' ? 'drumroll' : null;
     sting(special || entry.mood || 'celebrate');
     if (getSfx() === 'voice' && entry.id) {
       const opts = { delay: special ? 0.55 : 0.18, gain: 1 };
-      playUrl(`${BASE}${entry.id}_${voiceFor(seat)}.mp3`, opts)
+      playUrl(`${BASE}${entry.id}_${voiceFor(seat, info)}.mp3`, opts)
         .then(d => { if (!d && canPlay()) playUrl(`${BASE}${entry.id}.mp3`, opts); });
     }
   }
@@ -201,7 +220,7 @@ const Sound = (() => {
       if (event.startsWith('joker')) STINGS.joker(start); else STINGS.host(start);
     }
     hostBusyUntil = start + 1.6;
-    playUrl(`${BASE}host_${lang}_${event}.mp3`, { delay: start - now + (event.startsWith('joker') ? 0.35 : 0.18), gain: 1 })
+    playUrl(hostFile(lang, event), { delay: start - now + (event.startsWith('joker') ? 0.35 : 0.18), gain: 1 })
       .then(d => { if (d) hostBusyUntil = Math.max(hostBusyUntil, start + 0.3 + d); });
   }
 
@@ -218,7 +237,7 @@ const Sound = (() => {
   function reelSting(name, delay = 0) { if (!canPlay()) return; try { (STINGS[name] || STINGS.celebrate)(ctx.currentTime + delay); } catch (_) {} }
   function reelVoice(event, delay = 0) {
     const lang = getHost() === 'en' ? 'en' : 'or';
-    return playUrl(`${BASE}host_${lang}_${event}.mp3`, { delay, gain: 1 });
+    return playUrl(hostFile(lang, event), { delay, gain: 1 });
   }
   // A soft dholak-and-drone bed under the whole reel
   function reelBed(seconds) {
@@ -244,7 +263,7 @@ const Sound = (() => {
 
   return {
     getSfx, getHost, getTalk,
-    setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), setTalk: v => lsSet(LS_TALK, v),
+    setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), getHostVoice, setHostVoice: v => lsSet(LS_HOSTV, v === 'm' ? 'm' : 'f'), setTalk: v => lsSet(LS_TALK, v),
     reaction, voiceFor, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
     reelSting, reelVoice, reelBed,
     _ctx: () => ctx,
