@@ -1,5 +1,5 @@
 // Service Worker for Nattis PWA
-const CACHE_NAME = 'nattis-v63';
+const CACHE_NAME = 'nattis-v64';
 const ASSETS = [
   './',
   './index.html',

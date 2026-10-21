@@ -13,7 +13,7 @@
 // - Must follow suit if possible, BUT jokers can be played anytime
 // - Cannot lead a trick with a joker
 // - Scoring: bid met = bid value pts; bid failed = opponents get 2x bid pts
-// - After 5 tricks, bidding team can raise to LS (needs 4 of 5) or GS (needs 5 of 5)
+// - After 5 tricks, bidding team can raise by +1, +2, … up to 9 if still reachable (8 = LS, 9 = GS)
 // - LS (bid/raised to 8, take 8) = 15 pts; GS (bid/raised to 9, take 9) = 20 pts;
 //   without declaring, extra tricks just score the bid
 // - Game to 62 points
@@ -247,18 +247,26 @@ const Engine = (() => {
       const tricksTaken = gameState.currentRound?.tricksTaken || { A: 0, B: 0 };
       const taken = tricksTaken[biddingTeam] || 0;
 
-      // Raise option only comes after 5 tricks, and only to a slam still in reach:
-      // LS (8) with at least 4 of the first 5 tricks, GS (9) with all 5
+      // Raise comes after 5 tricks: the bidding team may raise by any amount (+1, +2, …) up to 9,
+      // as long as the new bid is still reachable with the tricks left. 8 = LS, 9 = GS.
+      // e.g. bid 5: +1→6, +2→7, +3→8 LS, +4→9 GS · bid 7: +1→8 LS, +2→9 GS · bid 8: +1→9 GS · bid 9: no raise
       if (tricksPlayed < 5) return false;
       if (bid <= currentHighBid) return false;
-      if (bid === 8) return taken >= 4;
-      if (bid === 9) return taken >= 5;
-      return false;
+      return bid <= taken + (9 - tricksPlayed);
     }
 
     // Default fallback (shouldn't reach here in normal flow)
     if (currentHighBid === 0) return bid >= 5;
     return bid > currentHighBid;
+  }
+
+  // Raise targets open to the bidding team right now (empty = no raise possible)
+  function raiseOptions(gameState) {
+    const r = gameState && gameState.currentRound;
+    if (!r) return [];
+    const out = [];
+    for (let b = r.bid + 1; b <= 9; b++) if (isValidBid(b, r.bid, 'RAISE_CHECK', gameState)) out.push(b);
+    return out;
   }
 
   // Scoring
@@ -410,7 +418,7 @@ const Engine = (() => {
     sortHand, canFollowSuit, getPlayableCards,
     determineTrickWinnerRefined,
     isValidBid, calculateScore,
-    isGameOver, getWinner, TARGET_SCORE,
+    isGameOver, getWinner, TARGET_SCORE, raiseOptions,
     createGameState,
   };
 })();

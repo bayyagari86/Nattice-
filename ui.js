@@ -1147,7 +1147,7 @@ const UI = (() => {
         infoEl.textContent = `${player ? player.name : '?'} is playing...`;
       }
     } else if (state.phase === 'RAISE_CHECK') {
-      infoEl.textContent = 'Bidding team can raise their bid...';
+      { const o = Engine.raiseOptions(state); infoEl.textContent = `Bidding team can raise ${state.currentRound.bid} → up to ${o.length ? o[o.length - 1] : state.currentRound.bid}${o.includes(8) ? ' (8 LS' + (o.includes(9) ? ', 9 GS)' : ')') : o.includes(9) ? ' (9 GS)' : ''}…`; }
     } else if (state.phase === 'ROUND_END') {
       infoEl.textContent = 'Round over \u2014 next round starting...';
     } else if (state.phase === 'SHUFFLING') {
@@ -1374,13 +1374,9 @@ const UI = (() => {
       return `<div class="commitment-item${has ? '' : ' pending'}"><span>${escapeHtml(name)}${tag}</span><b>${has ? '+' + n : '…'}</b></div>`;
     }).join('');
     const reach = Math.min(9, won + total);
-    let slam = reach >= 9 && won >= 5 ? 'GS (9)' : reach >= 8 ? 'LS (8)' : null;
-    if (bidderPreview) { const pl = raisePlan(state, +selEl.value || 0); slam = pl === 9 ? 'GS (9)' : pl === 8 ? 'LS (8)' : null; }
-    box.innerHTML = `${rows}<div class="commitment-total">Won ${won} + committed ${total} = ${reach}${slam ? ` → ${slam}` : ' — not enough for LS'}</div>`;
-    document.querySelectorAll('#raise-buttons [data-raise]').forEach(btn => {
-      const b = +btn.dataset.raise;
-      btn.classList.toggle('suggested', (b === 8 && reach >= 8 && !(reach >= 9 && won >= 5)) || (b === 9 && reach >= 9 && won >= 5));
-    });
+    const target = planFor(state, reach);
+    box.innerHTML = `${rows}<div class="commitment-total">Won ${won} + committed ${total} = ${reach}${target ? ` → raise to ${raiseLabel(target, r.bid)}` : ` — no raise (bid is ${r.bid})`}</div>`;
+    document.querySelectorAll('#raise-buttons [data-raise]').forEach(btn => btn.classList.toggle('suggested', +btn.dataset.raise === target));
     const mine = Object.prototype.hasOwnProperty.call(commits, me);
     const sel = document.getElementById('my-commitment');
     const cb = document.getElementById('commit-btn');
@@ -1388,23 +1384,33 @@ const UI = (() => {
     if (cb && me === r.bidder) {
       // The bidder's Commit is the decision: raise to the slam the team's total reaches, else no raise
       const plan = raisePlan(state, sel ? +sel.value || 0 : 0);
-      cb.textContent = plan ? `Commit → raise to ${plan} (${plan === 9 ? 'GS' : 'LS'})` : 'Commit → no raise';
+      cb.textContent = plan ? `Commit → raise to ${raiseLabel(plan, r.bid)}` : 'Commit → no raise';
     } else if (cb) {
-      cb.textContent = mine ? 'Update' : 'Commit';
+      // Partners commit once: the choice locks
+      cb.textContent = mine ? `✓ Committed +${+commits[me] || 0}` : 'Commit';
+      cb.disabled = !!mine; if (sel) sel.disabled = !!mine;
       const note = document.getElementById('commit-note');
-      if (note) note.textContent = mine ? `✓ You committed +${+commits[me] || 0}. ${(state.players[r.bidder]?.name || 'The bidder')} decides the raise…` : '';
+      if (note) note.textContent = mine ? `${(state.players[r.bidder]?.name || 'The bidder')} decides the raise…` : '';
     }
   }
 
-  // Slam the bidding team reaches if the bidder commits `mine` more tricks: 9, 8 or 0
+  // "7 (+2)", "8 (LS, +3)", "9 (GS, +1)"
+  function raiseLabel(b, from) {
+    const tag = b === 9 ? 'GS' : b === 8 ? 'LS' : '';
+    return `${b} (${tag ? tag + ', ' : ''}+${b - from})`;
+  }
+  // Highest valid raise the team total reaches, or 0 for no raise
+  function planFor(state, reach) {
+    const r = state.currentRound;
+    for (let b = Math.min(9, reach); b > r.bid; b--) if (Engine.isValidBid(b, r.bid, 'RAISE_CHECK', state)) return b;
+    return 0;
+  }
+  // The raise the team total reaches if the bidder commits `mine` more tricks (0 = no raise)
   function raisePlan(state, mine) {
     const r = state.currentRound, me = Game.getMySeat();
     const won = r.tricksTaken[r.biddingTeam] || 0;
     const others = Object.entries(r.raiseCommitments || {}).filter(([s]) => +s !== me).reduce((a, [, n]) => a + (+n || 0), 0);
-    const reach = won + others + (+mine || 0);
-    if (reach >= 9 && Engine.isValidBid(9, r.bid, 'RAISE_CHECK', state)) return 9;
-    if (reach >= 8 && Engine.isValidBid(8, r.bid, 'RAISE_CHECK', state)) return 8;
-    return 0;
+    return planFor(state, won + others + (+mine || 0));
   }
 
   function showRaisePrompt(state) {
@@ -1434,10 +1440,10 @@ const UI = (() => {
     
     panel.innerHTML = `
       <div class="bid-title">Raise Discussion (<span id="raise-countdown">${initialSecs}</span>s)</div>
-      <div class="raise-info">Current bid: ${currentBid} | Tricks won: ${tricksWon}</div>
+      <div class="raise-info">Current bid: ${currentBid} | Tricks won: ${tricksWon} | Can raise up to ${Math.max(...Engine.raiseOptions(state), currentBid)}</div>
       <div class="commitments-box" id="raise-commits"></div>
       <div class="raise-commitment" id="raise-commitment">
-        <label>I can surely win:</label>
+        <label>${isBidder ? 'I can win' : 'I can take'}:</label>
         <select id="my-commitment">
           <option value="0">0 more</option>
           <option value="1">1 more</option>
@@ -1448,8 +1454,8 @@ const UI = (() => {
         <button class="bid-btn" id="commit-btn" style="padding:8px 16px;font-size:12px;">Commit</button>
       </div>
       <div class="commit-note" id="commit-note" aria-live="polite"></div>
-      <button class="bid-btn" id="extend-timer-btn" style="padding:6px 12px;font-size:11px;margin-top:8px;">+10s</button>
-      ${isBidder ? '<div class="bid-buttons" id="raise-buttons"></div>' : '<div class="raise-waiting">Waiting for bidder to decide...</div>'}
+
+      <div class="raise-help">${isBidder ? 'Partners say how many more they can take. Add yours and Commit — the total decides the raise.' : 'Tell your bidder how many more tricks you can surely take.'}</div>
     `;
     
     // Live countdown — deadline-based so every client stays in sync
@@ -1472,13 +1478,16 @@ const UI = (() => {
         const plan = raisePlan(st, tricks);
         Game.commitRaiseTricks(tricks);
         panel.style.display = 'none';
-        if (plan) { showToast(`Raised to ${plan} (${plan === 9 ? 'Grand Slam' : 'Little Slam'})`); Game.raiseBid(plan); }
-        else { showToast('Team total is short of a slam — no raise'); Game.noRaise(); }
+        if (plan) Game.raiseBid(plan);
+        else { showToast(`Team total doesn't beat the bid of ${st.currentRound.bid} — no raise`); Game.noRaise(); }
         return;
       }
       Game.commitRaiseTricks(tricks);
+      const cbtn = document.getElementById('commit-btn'), sel = document.getElementById('my-commitment');
+      if (cbtn) { cbtn.textContent = `✓ Committed +${tricks}`; cbtn.disabled = true; }
+      if (sel) sel.disabled = true;
       const note = document.getElementById('commit-note');
-      if (note) note.textContent = `✓ You committed +${tricks}. ${(st && st.players[st.currentRound.bidder]?.name) || 'The bidder'} decides the raise…`;
+      if (note) note.textContent = `${(st && st.players[st.currentRound.bidder]?.name) || 'The bidder'} decides the raise…`;
     });
     document.getElementById('my-commitment')?.addEventListener('change', () => refreshRaiseCommitments(Game.getState()));
     
@@ -1487,36 +1496,6 @@ const UI = (() => {
       Game.extendRaiseTimer();
     });
     
-    // Only bidder sees raise/no-raise buttons
-    if (isBidder) {
-      const btns = document.getElementById('raise-buttons');
-      
-      const noBtn = document.createElement('button');
-      noBtn.className = 'bid-btn pass-btn';
-      noBtn.textContent = 'No Raise';
-      noBtn.addEventListener('click', () => {
-        panel.style.display = 'none';
-        Game.noRaise();
-      });
-      btns.appendChild(noBtn);
-      
-      for (let b = currentBid + 1; b <= 9; b++) {
-        // Only show valid bids (winning team can raise in raise phase)
-        if (Engine.isValidBid(b, currentBid, 'RAISE_CHECK', state)) {
-          const btn = document.createElement('button');
-          btn.className = 'bid-btn';
-          btn.dataset.raise = String(b);
-          btn.textContent = b;
-          if (b === 8) btn.textContent = `${b} (LS)`;
-          if (b === 9) btn.textContent = `${b} (GS)`;
-          btn.addEventListener('click', () => {
-            panel.style.display = 'none';
-            Game.raiseBid(b);
-          });
-          btns.appendChild(btn);
-        }
-      }
-    }
     refreshRaiseCommitments(state);
   }
 

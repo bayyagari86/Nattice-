@@ -2079,9 +2079,8 @@ const Game = (() => {
         if (state.currentRound.tricksPlayed === 5 && !state.currentRound.raised) {
           const biddingTeam = state.currentRound.biddingTeam;
           const biddingTricks = state.currentRound.tricksTaken[biddingTeam];
-          // LS (8) is still reachable with 4 of the first 5 tricks; GS (9) needs all 5
-          if (state.currentRound.bid < 9 && (biddingTricks >= 5 || (biddingTricks >= 4 && state.currentRound.bid < 8))) {
-            // Bidding team can still make a slam — offer the raise
+          // Offer the raise whenever a higher bid is still reachable (bid + 1 ≤ tricks won + 4 left)
+          if (Engine.raiseOptions(state).length) {
             state.phase = 'RAISE_CHECK';
             state.currentRound.currentTrick = [];
             state.currentRound.raiseCommitments = {};
@@ -2252,7 +2251,9 @@ const Game = (() => {
   function processRaise(newBid) {
     clearRaiseTimer();
     if (!state || state.phase !== 'RAISE_CHECK') return;
-    if (newBid > state.currentRound.bid && newBid <= 9) {
+    if (Engine.isValidBid(newBid, state.currentRound.bid, 'RAISE_CHECK', state)) {
+      const from = state.currentRound.bid;
+      state.currentRound.raisedFrom = from;
       state.currentRound.bid = newBid;
       state.currentRound.raised = true;
       // Committed tricks become each player's goal for the rest of the round
@@ -2260,7 +2261,7 @@ const Game = (() => {
       for (const [st, n] of Object.entries(state.currentRound.raiseCommitments || {})) if (+n > 0) goals[st] = +n;
       state.currentRound.raiseGoals = goals;
       state.currentRound.raiseAtTrick = state.currentRound.tricksPlayed;
-      UI.showToast(`Bid raised to ${newBid}${newBid === 8 ? ' (LS)' : newBid === 9 ? ' (GS)' : ''}!`);
+      UI.showToast(`Bid raised +${newBid - from} to ${newBid}${newBid === 8 ? ' (LS)' : newBid === 9 ? ' (GS)' : ''}!`);
     }
     resumeAfterRaise();
   }
@@ -3245,8 +3246,12 @@ const Game = (() => {
     const total = Math.min(remaining, own + others);
     const L = aiLearned();
     const gsSlack = L.boldGS ? 1 : 0, lsSlack = L.boldLS ? 1 : 0; // learned only from raises that won
-    if (tricks === 5 && r.bid < 9 && total >= remaining - gsSlack) { processRaise(9); return; }   // GS
-    if (r.bid < 8 && tricks + total >= 8 - lsSlack) { processRaise(8); return; }                  // LS
+    const can = b => Engine.isValidBid(b, r.bid, 'RAISE_CHECK', state);
+    if (tricks === 5 && can(9) && total >= remaining - gsSlack) { processRaise(9); return; }      // GS
+    if (can(8) && tricks + total >= 8 - lsSlack) { processRaise(8); return; }                     // LS
+    // Smaller raise (+1/+2) only on certain tricks: a failed raise gives the opponents double
+    const sure = Math.min(9, tricks + total);
+    if (sure > r.bid && can(sure)) { processRaise(sure); return; }
     // Wait for a human partner who hasn't committed yet; the timer still applies
     const humanPending = state.players.some((pl, i) => pl && !pl.isAI && i !== seat &&
       Engine.getTeam(i) === r.biddingTeam && !(String(i) in (r.raiseCommitments || {})));
