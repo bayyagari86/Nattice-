@@ -1324,6 +1324,11 @@ const Game = (() => {
         bcast({ type: 'VOICE', seat, on: !!msg.on });
         break;
       }
+      case 'VOICE_RELAY': {     // a listener can't get a talker's audio directly (5G, strict NAT): host passes it on
+        if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.talker)) return;
+        if (typeof Voice !== 'undefined' && Voice.onRelayRequest) Voice.onRelayRequest(peerToSeat.get(fromPeer), msg.talker);
+        break;
+      }
       case 'VOICE_NUDGE': {     // a listener isn't getting a talker's audio: pass it to the talker
         if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.to)) return;
         const from = peerToSeat.get(fromPeer);
@@ -3316,6 +3321,14 @@ const Game = (() => {
     else bcast({ type: 'VOICE_NUDGE', to: talkerSeat });
   }
 
+  // Ask the host to pass a talker's audio on to us (used when the direct line can't connect)
+  function sendVoiceRelay(talkerSeat) {
+    if (isSoloMode || !state || Network.getIsHost() || !Number.isInteger(talkerSeat)) return false;
+    const h = getHostPeerId();
+    if (!h) return false;
+    return send(h, { type: 'VOICE_RELAY', talker: talkerSeat });
+  }
+
   // Broadcast emoji reaction to all players
   function broadcastEmoji(emoji) {
     if (!isSoloMode) {
@@ -3493,7 +3506,7 @@ const Game = (() => {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
-    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji, sendVoiceState, sendVoiceNudge,
+    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji, sendVoiceState, sendVoiceNudge, sendVoiceRelay, getHostPeerId,
     stopAINameRotation, applyBotNames,
     kickPlayer,
     getSavedSession, resumeSavedSession, clearSession,

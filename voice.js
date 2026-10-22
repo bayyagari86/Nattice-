@@ -3,8 +3,10 @@
 //
 // Hold the mic button to talk; release to stop. Only the person holding
 // the button sends audio: their phone opens a one-way audio call to each
-// other human player (direct, or through the TURN relay when phones can't
-// reach each other). Nothing is recorded or sent while the button is up.
+// other human player. When two phones can't reach each other directly
+// (common on 5G / mobile carriers), the host's phone passes the audio on:
+// every phone is already connected to the host for the game itself.
+// Nothing is recorded or sent while the button is up.
 // Everyone else sees a green ring on the talker's seat.
 //
 // The microphone is opened on the first press, kept warm while you're
@@ -28,6 +30,13 @@ const Voice = (() => {
   const talkTimers = {};
   let pressed = false, live = false, maxTimer = null, idleTimer = null, blocked = false;
   let pendingAudio = new Set();   // audio elements the browser refused to start
+  // Relay through the host (for pairs that can't connect directly)
+  const relayed = new Set();      // listener side: talker seats we hear via the host
+  const relayAsked = {};          // listener side: talker seat -> last time we asked the host
+  const fwd = new Map();          // host side: "T>L" -> MediaConnection forwarding T's audio to L
+  const relayPairs = new Set();   // host side: "T>L" pairs that need the relay
+  const directDead = new Map();   // talker side: peerId -> time the direct line last failed 3 times
+  let relayStats = { asked: 0, forwarded: 0 };
 
   const st = () => (typeof Game !== 'undefined' && Game.getState) ? Game.getState() : null;
   const me = () => (typeof Game !== 'undefined' && Game.getMySeat) ? Game.getMySeat() : -1;
@@ -41,6 +50,9 @@ const Voice = (() => {
       .filter(({ p, seat }) => p && seat !== mine && !p.isAI && p.peerId && p.connected !== false)
       .map(({ p, seat }) => ({ peerId: p.peerId, seat }));
   }
+  const amHost = () => { try { return !!(typeof Network !== 'undefined' && Network.getIsHost()); } catch (_) { return false; } };
+  const peerOfSeat = (seat) => { const s = st(); return s && s.players && s.players[seat] && !s.players[seat].isAI ? s.players[seat].peerId : null; };
+  const hostPeer = () => { try { return Game.getHostPeerId ? Game.getHostPeerId() : null; } catch (_) { return null; } };
   function seatOfPeer(peerId) {
     const s = st(); if (!s || !s.players) return -1;
     return s.players.findIndex((p, seat) => p && !p.isAI && p.peerId === peerId && seat !== me());
@@ -91,6 +103,7 @@ const Voice = (() => {
       try { c.close(); } catch (_) {}
       outCalls.delete(peerId);
       if (tries < 3 && targets().some(t => t.peerId === peerId)) dial(peerId, mic, tries + 1);
+      else directDead.set(peerId, Date.now()); // the listener will be served through the host
     }, 2500);
   }
   function ensureCalls(stream) {
@@ -103,6 +116,8 @@ const Voice = (() => {
     let k = 0;
     for (const { peerId } of want) {
       if (outCalls.has(peerId)) continue;
+      // Direct line failed recently: don't keep the phone busy retrying; the host relays to them
+      if (directDead.has(peerId) && Date.now() - directDead.get(peerId) < 120000) continue;
       const delay = (k++) * 120;
       if (!delay) dial(peerId, stream, 1);
       else { outCalls.set(peerId, { _pending: true, peerConnection: null, close() { outCalls.delete(peerId); } });
@@ -172,29 +187,93 @@ const Voice = (() => {
 
   // ---------- listening ----------
   function onIncomingCall(call) {
-    const seat = seatOfPeer(call.peer);
-    if (window.__voiceLog) console.log('[Voice] incoming from', call.peer, 'seat', seat);
-    if (seat < 0 || getPref() === 'off') { try { call.close(); } catch (_) {} return; }
-    const prev = inCalls.get(call.peer);
+    const md = call.metadata || {};
+    const viaHost = Number.isInteger(md.relayOf);
+    // Relayed audio must come from the host; it belongs to the original talker's seat
+    const seat = viaHost ? (call.peer === hostPeer() && md.relayOf !== me() ? md.relayOf : -1) : seatOfPeer(call.peer);
+    if (window.__voiceLog) console.log('[Voice] incoming from', call.peer, 'seat', seat, viaHost ? '(relayed)' : '');
+    // The host keeps talkers' lines even with its own voice off: other players may need them relayed
+    const keepForRelay = !viaHost && amHost();
+    if (seat < 0 || (getPref() === 'off' && !keepForRelay)) { try { call.close(); } catch (_) {} return; }
+    const key = viaHost ? 'relay:' + seat : call.peer;
+    const prev = inCalls.get(key);
     if (prev) { try { prev.call.close(); } catch (_) {} }
     const audio = new Audio();
     audio.autoplay = true; audio.setAttribute('playsinline', ''); audio.dataset.seat = seat;
-    const entry = { call, audio };
-    inCalls.set(call.peer, entry);
+    audio.muted = getPref() === 'off';
+    const entry = { call, audio, seat, viaHost, stream: null };
+    inCalls.set(key, entry);
+    if (viaHost) { relayed.add(seat); muteDirect(seat); }
     call.on('stream', (remote) => {
+      entry.stream = remote;
       audio.srcObject = remote;
+      if (!viaHost && relayed.has(seat)) audio.muted = true;  // already hearing them through the host
       const p = audio.play();
       if (p && p.catch) p.catch(() => { pendingAudio.add(audio); toast('Tap the screen to hear voice chat'); });
+      if (!viaHost && amHost()) forwardAllFrom(seat);          // pass this talker on to anyone who needs it
     });
     const end = (why) => {
       if (window.__voiceLog) console.log('[Voice] incoming ended', call.peer, why && (why.type || why.message || why));
-      if (inCalls.get(call.peer) === entry) inCalls.delete(call.peer);
+      if (inCalls.get(key) === entry) inCalls.delete(key);
+      if (viaHost && !inCalls.has(key)) {           // relay ended: fall back to the direct line, if any
+        relayed.delete(seat);
+        const pid = peerOfSeat(seat), d = pid && inCalls.get(pid);
+        if (d) d.audio.muted = getPref() === 'off';
+      }
       try { audio.pause(); audio.srcObject = null; } catch (_) {}
       pendingAudio.delete(audio);
     };
     call.on('close', () => end('close')); call.on('error', e => end(e));
     call.answer();   // listen only: we send nothing back
   }
+  function muteDirect(seat) {
+    const pid = peerOfSeat(seat); const e = pid && inCalls.get(pid);
+    if (e) e.audio.muted = true;
+  }
+  // ---------- relay through the host ----------
+  // Listener: ask the host to pass this talker's audio on to us
+  function askRelay(seat) {
+    if (amHost() || relayed.has(seat)) return;
+    const hp = hostPeer(); if (!hp || peerOfSeat(seat) === hp) return; // the host talks to us directly
+    if (relayAsked[seat] && Date.now() - relayAsked[seat] < 1500) return;
+    relayAsked[seat] = Date.now(); relayStats.asked++;
+    try { Game.sendVoiceRelay && Game.sendVoiceRelay(seat); } catch (_) {}
+  }
+  // Host: a listener asked for a talker
+  function onRelayRequest(listenerSeat, talkerSeat) {
+    if (!amHost() || listenerSeat === talkerSeat || talkerSeat === me() || listenerSeat === me()) return;
+    relayPairs.add(talkerSeat + '>' + listenerSeat);
+    forward(talkerSeat, listenerSeat);
+  }
+  function streamFrom(seat) {
+    const pid = peerOfSeat(seat); const e = pid && inCalls.get(pid);
+    return e && e.stream && e.stream.getAudioTracks().some(t => t.readyState === 'live') ? e.stream : null;
+  }
+  function forward(T, L) {
+    const key = T + '>' + L, stream = streamFrom(T), lp = peerOfSeat(L);
+    if (!stream || !lp) return; // talker's line to us isn't up yet: forwarded when it is
+    const cur = fwd.get(key);
+    if (cur && !cur._failed && cur._stream === stream) {
+      const ice = cur.peerConnection && cur.peerConnection.iceConnectionState;
+      if (!['failed', 'closed', 'disconnected'].includes(ice)) return;   // already passing it on
+    }
+    if (cur) { try { cur.close(); } catch (_) {} fwd.delete(key); }
+    const c = Network.callPeer(lp, stream, { v: 1, relayOf: T });
+    if (!c) return;
+    c._stream = stream; fwd.set(key, c); relayStats.forwarded++;
+    const drop = () => { if (fwd.get(key) === c) fwd.delete(key); };
+    c.on('close', drop); c.on('error', () => { c._failed = true; drop(); });
+  }
+  function forwardAllFrom(T) { for (const k of relayPairs) { const [t, l] = k.split('>').map(Number); if (t === T) forward(t, l); } }
+  function pruneRelay() {
+    const s = st();
+    for (const k of Array.from(relayPairs)) {
+      const [t, l] = k.split('>').map(Number);
+      if (!amHost() || !peerOfSeat(t) || !peerOfSeat(l)) { relayPairs.delete(k); const c = fwd.get(k); if (c) { try { c.close(); } catch (_) {} fwd.delete(k); } }
+    }
+    if (!s) relayed.clear();
+  }
+
   // Browsers that refused to start audio without a tap get another go on the next tap
   ['pointerdown', 'touchend', 'click'].forEach(ev => window.addEventListener(ev, () => {
     for (const a of Array.from(pendingAudio)) { a.play().then(() => pendingAudio.delete(a)).catch(() => {}); }
@@ -211,6 +290,7 @@ const Voice = (() => {
       talking.add(seat);
       talkTimers[seat] = setTimeout(() => setTalking(seat, false), MAX_TALK_MS + 3000); // safety net
       if (seat !== me()) watchIncoming(seat, 0);
+      if (amHost()) forwardAllFrom(seat);
     } else talking.delete(seat);
     const el = document.querySelector(`#player-positions .table-player[data-seat="${seat}"]`);
     if (el) el.classList.toggle('talking', talking.has(seat));
@@ -220,22 +300,32 @@ const Voice = (() => {
 
   // Listener-side check: someone is shown talking, so their audio should be
   // arriving. If it isn't after ~1.2 s, ask their phone to redial us.
-  async function packetsFrom(seat) {
-    const s = st(); const pid = s && s.players[seat] && s.players[seat].peerId;
-    const e = pid && inCalls.get(pid);
+  async function packetsOn(e) {
     if (!e || !e.call.peerConnection) return 0;
     let n = 0;
     try { (await e.call.peerConnection.getStats()).forEach(x => { if (x.type === 'inbound-rtp' && x.kind === 'audio') n = x.packetsReceived || 0; }); } catch (_) {}
     return n;
+  }
+  function directUp(seat) {
+    const pid = peerOfSeat(seat), e = pid && inCalls.get(pid), pc = e && e.call.peerConnection;
+    return !!(pc && (pc.connectionState === 'connected' || ['connected', 'completed'].includes(pc.iceConnectionState)));
+  }
+  async function packetsFrom(seat) {
+    const pid = peerOfSeat(seat);
+    return Math.max(await packetsOn(pid && inCalls.get(pid)), await packetsOn(inCalls.get('relay:' + seat)));
   }
   function watchIncoming(seat, tries) {
     if (getPref() === 'off') return;
     setTimeout(async () => {
       if (!talking.has(seat)) return;
       if (await packetsFrom(seat) > 0) return;
+      // Nothing arriving: ask the talker to redial, and the host to pass their audio on.
+      // Whichever path works first is used; the host path is kept for the rest of the game.
       try { if (Game.sendVoiceNudge) Game.sendVoiceNudge(seat); } catch (_) {}
-      if (tries < 2) watchIncoming(seat, tries + 1);
-    }, 1200);
+      // Give the direct line a fair chance first (~2 s); a line still not connected by then won't
+      if (tries >= 1 && !directUp(seat)) askRelay(seat);
+      if (tries < 3) watchIncoming(seat, tries + 1);
+    }, tries ? 1000 : 900);
   }
   // Talker side: a listener says our audio isn't reaching them — redial them
   let nudges = 0;
@@ -267,7 +357,11 @@ const Voice = (() => {
     if (!show && pressed) stop();
     if (!show && !pressed && (mic || outCalls.size) && !document.getElementById('game-screen')?.classList.contains('active')) releaseMic();
     // Close incoming lines from players who are no longer at the table
-    for (const [pid, e] of inCalls) if (seatOfPeer(pid) < 0) { try { e.call.close(); } catch (_) {} }
+    for (const [key, e] of inCalls) {
+      const gone = e.viaHost ? (!peerOfSeat(e.seat) || e.call.peer !== hostPeer()) : seatOfPeer(key) < 0;
+      if (gone) { try { e.call.close(); } catch (_) {} inCalls.delete(key); if (e.viaHost) relayed.delete(e.seat); }
+    }
+    pruneRelay();
   }
   function bindButton() {
     const b = document.getElementById('ptt-btn'); if (!b || b._bound) return;
@@ -308,9 +402,9 @@ const Voice = (() => {
   }
 
   return {
-    getPref, setPref, setTalking, isTalking, refresh, onNudge,
+    getPref, setPref, setTalking, isTalking, refresh, onNudge, onRelayRequest,
     // test hooks
-    __debug: { nudges: () => nudges, outCalls: () => outCalls.size, inCalls: () => inCalls.size, micOpen: () => !!mic, live: () => live, blocked: () => blocked,
+    __debug: { nudges: () => nudges, relay: () => ({ ...relayStats, relayed: [...relayed], pairs: [...relayPairs], fwd: fwd.size, directDead: directDead.size }), outCalls: () => outCalls.size, inCalls: () => inCalls.size, micOpen: () => !!mic, live: () => live, blocked: () => blocked,
       inAudios: () => Array.from(inCalls.values()).map(e => e.audio), start, stop,
       stats: async () => { const out = []; for (const [pid, c] of outCalls) { const r = await c.peerConnection.getStats(); r.forEach(x => { if (x.type === 'outbound-rtp') out.push({ dir: 'out', pid, bytes: x.bytesSent, pk: x.packetsSent }); if (x.type === 'transport') out.push({ pid, dtls: x.dtlsState, ice: x.iceState }); }); out.push({ pid, conn: c.peerConnection.connectionState, sig: c.peerConnection.signalingState }); }
         for (const [pid, e] of inCalls) { const r = await e.call.peerConnection.getStats(); r.forEach(x => { if (x.type === 'inbound-rtp') out.push({ dir: 'in', pid, bytes: x.bytesReceived, pk: x.packetsReceived }); }); }

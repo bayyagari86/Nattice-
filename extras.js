@@ -104,7 +104,7 @@ const Extras = (() => {
 
   function fxLayer(kind) {
     if (!kind) return '';
-    const n = { stars: 26, colours: 9, petals: 12, embers: 14, glints: 12, motes: 16 }[kind] || 12;
+    const n = { stars: 14, colours: 5, petals: 7, embers: 8, glints: 7, motes: 8 }[kind] || 7; // fewer = cooler phone
     const items = Array.from({ length: n }, (_, i) => {
       const x = (i * 37 + 11) % 96 + 2, y = kind === 'stars' ? (i * 53) % 26 + 2 : (i * 29 + 7) % 70 + 15;
       return `<span class="fx-${kind}" style="left:${x}%;top:${y}%;animation-delay:-${((i * 1.7) % 9).toFixed(1)}s;--i:${i % 5}"></span>`;
@@ -147,12 +147,12 @@ const Extras = (() => {
     if (t.night) { el.style.setProperty('--night-p', art(t.night)); el.style.setProperty('--night-l', artL(t.night)); }
     const [m1, m2, m3] = t.mat, bs = document.body.style;
     bs.setProperty('--mat-a', m1); bs.setProperty('--mat-b', m2); bs.setProperty('--mat-c', m3);
-    const flies = theme === 'chaupal' ? `<div class="flies">${Array.from({ length: 12 }, (_, i) =>
+    const flies = theme === 'chaupal' ? `<div class="flies">${Array.from({ length: 6 }, (_, i) =>
       `<span class="firefly" style="left:${(i * 29 + 7) % 92 + 3}%;top:${(i * 37 + 12) % 46 + 8}%;animation-delay:${(i % 5) * 0.9}s"></span>`).join('')}</div>` : '';
     const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const saveData = navigator.connection && navigator.connection.saveData;
     const upright = !window.matchMedia || matchMedia('(orientation: portrait)').matches;
-    const vid = t.video && upright && !reduce && !saveData
+    const vid = t.video && upright && !reduce && !saveData && !isSaver()
       ? `<video class="scene-video" muted playsinline autoplay preload="auto" src="assets/themes/${t.video}.mp4"></video>` : '';
     el.innerHTML = `<div class="scene"><div class="scene-img"></div>${t.night ? '<div class="scene-img scene-night"></div>' : ''}${vid}</div>
       <div class="scene-tint"></div>
@@ -235,6 +235,36 @@ const Extras = (() => {
   }
 
   // ---------- Bot speed & names (per device; host's settings drive online bots) ----------
+  // ---------- Battery saver: 'auto' turns on with low battery, data saver or reduce motion ----------
+  const LS_SAVER = 'nattis.saver';           // 'auto' | 'on' | 'off'
+  let lowBattery = false;
+  const getSaverPref = () => { try { const v = localStorage.getItem(LS_SAVER); return ['on', 'off'].includes(v) ? v : 'auto'; } catch (_) { return 'auto'; } };
+  function isSaver() {
+    const pref = getSaverPref();
+    if (pref !== 'auto') return pref === 'on';
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const saveData = navigator.connection && navigator.connection.saveData;
+    return !!(lowBattery || reduce || saveData);
+  }
+  function applySaver() {
+    const on = isSaver(), was = document.body.classList.contains('saver');
+    document.body.classList.toggle('saver', on);
+    const v = document.querySelector('#theme-deco video.scene-video');
+    if (v) { try { on ? v.pause() : v.play().catch(() => {}); } catch (_) {} }
+    if (on !== was && typeof applyTheme === 'function') { try { applyTheme(); } catch (_) {} }
+  }
+  try {
+    if (navigator.getBattery) navigator.getBattery().then(b => {
+      const upd = () => { lowBattery = !b.charging && b.level <= 0.3; applySaver(); };
+      b.addEventListener('levelchange', upd); b.addEventListener('chargingchange', upd); upd();
+    }).catch(() => {});
+  } catch (_) {}
+  // Nothing needs to animate while the app is in the background
+  document.addEventListener('visibilitychange', () => {
+    const v = document.querySelector('#theme-deco video.scene-video');
+    if (v) { try { document.hidden || isSaver() ? v.pause() : v.play().catch(() => {}); } catch (_) {} }
+  });
+
   const LS_SPEED = 'nattis.botSpeed', LS_NAMES = 'nattis.botNames', LS_FRIENDS = 'nattis.friendNames';
   const SPEEDS = {
     fast:    { label: 'Fast',    sub: '1 sec · default', ms: 1000 },
@@ -329,6 +359,8 @@ const Extras = (() => {
         Sound.getHost(), Sound.setHost, v => { if (v !== 'off') Sound.host('trump_hearts'); });
       seg('host-voice-options', [['f', 'Female', 'Kore'], ['m', 'Male', 'Sadachbia']], Sound.getHostVoice(), Sound.setHostVoice,
         () => { if (Sound.getHost() !== 'off') Sound.host('joker_big'); });
+      seg('saver-options', [['auto', 'Auto', 'Low battery'], ['on', 'On', 'Coolest'], ['off', 'Off', 'All effects']], getSaverPref(),
+        v => { try { localStorage.setItem(LS_SAVER, v); } catch (_) {} applySaver(); });
       seg('talk-options', [['on', 'On', 'Bots chatter'], ['off', 'Off', 'Quiet bots']], Sound.getTalk(), Sound.setTalk);
     }
     const hEl = document.getElementById('history-options');
@@ -704,6 +736,7 @@ const Extras = (() => {
 
   function init() {
     applyTheme();
+    applySaver();
     const tb = document.getElementById('theme-toggle');
     if (tb) tb.addEventListener('click', openThemePicker);
     const tt = document.getElementById('title-theme-btn');
