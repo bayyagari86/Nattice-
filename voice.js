@@ -6,6 +6,9 @@
 // other human player. When two phones can't reach each other directly
 // (common on 5G / mobile carriers), the host's phone passes the audio on:
 // every phone is already connected to the host for the game itself.
+// Last resort: if no audio line comes up at all (e.g. two phones on mobile
+// data that can't open a second connection), the voice is sent in small
+// chunks over the game's own connection, which is known to work.
 // Nothing is recorded or sent while the button is up.
 // Everyone else sees a green ring on the talker's seat.
 //
@@ -37,6 +40,15 @@ const Voice = (() => {
   const relayPairs = new Set();   // host side: "T>L" pairs that need the relay
   const directDead = new Map();   // talker side: peerId -> time the direct line last failed 3 times
   let relayStats = { asked: 0, forwarded: 0 };
+  // Voice over the game connection (last resort)
+  const DATA_RATE = 12000;        // phone-call quality, ~100 kbit/s
+  const dataHear = new Set();     // listener side: talker seats we hear over the game connection
+  const dataAsked = {};           // listener side: talker seat -> last time we asked
+  const dataPairs = new Set();    // host side: "T>L" pairs using the game connection
+  let feedOn = false;             // talker side (client): the host wants our audio as chunks
+  let actx = null, cap = null, outGain = null, tapWarned = false;
+  const play = {};                // talker seat -> { next, t, rms }
+  const dataStats = { sent: 0, recv: 0, asked: 0, fed: 0 };
 
   const st = () => (typeof Game !== 'undefined' && Game.getState) ? Game.getState() : null;
   const me = () => (typeof Game !== 'undefined' && Game.getMySeat) ? Game.getMySeat() : -1;
@@ -77,6 +89,7 @@ const Voice = (() => {
     return micPromise;
   }
   function releaseMic() {
+    stopFeed();
     for (const c of outCalls.values()) { try { c.close(); } catch (_) {} }
     outCalls.clear();
     if (mic) { mic.getTracks().forEach(t => { try { t.stop(); } catch (_) {} }); mic = null; }
@@ -152,13 +165,14 @@ const Voice = (() => {
     live = true;
     sendState(true);
     duck(true);
+    startFeed();
     // "Connecting" until every listener's line is up (or 1.5 s with at least one up,
     // so one slow phone doesn't hold everyone back)
     const began = Date.now();
     const check = () => {
       if (!pressed) return;
       const { up, total } = linesUp();
-      if (up > 0 && (up === total || Date.now() - began > 1500)) setButton('live');
+      if (cap || (up > 0 && (up === total || Date.now() - began > 1500))) setButton('live');
       else { setButton('connecting'); setTimeout(check, 150); }
     };
     check();
@@ -172,6 +186,7 @@ const Voice = (() => {
     clearTimeout(maxTimer);
     if (mic) mic.getAudioTracks().forEach(t => { t.enabled = false; });
     if (live) { live = false; sendState(false); }
+    stopFeed();
     duck(false);
     setButton('idle');
     scheduleIdle();
@@ -204,10 +219,11 @@ const Voice = (() => {
     const entry = { call, audio, seat, viaHost, stream: null };
     inCalls.set(key, entry);
     if (viaHost) { relayed.add(seat); muteDirect(seat); }
+    if (dataHear.has(seat)) audio.muted = true;
     call.on('stream', (remote) => {
       entry.stream = remote;
       audio.srcObject = remote;
-      if (!viaHost && relayed.has(seat)) audio.muted = true;  // already hearing them through the host
+      if ((!viaHost && relayed.has(seat)) || dataHear.has(seat)) audio.muted = true;  // already hearing them another way
       const p = audio.play();
       if (p && p.catch) p.catch(() => { pendingAudio.add(audio); toast('Tap the screen to hear voice chat'); });
       if (!viaHost && amHost()) forwardAllFrom(seat);          // pass this talker on to anyone who needs it
@@ -274,10 +290,146 @@ const Voice = (() => {
     if (!s) relayed.clear();
   }
 
+  // ---------- voice over the game connection ----------
+  function audioCtx() {
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+      try { actx = new AC(); outGain = actx.createGain(); outGain.connect(actx.destination); } catch (_) { actx = null; return null; }
+    }
+    if (actx.state === 'suspended' || actx.state === 'interrupted') actx.resume().catch(() => {});
+    return actx;
+  }
+  // G.711 mu-law: 8 bits per sample, good enough for speech
+  function mulawEnc(x) {
+    let v = Math.max(-1, Math.min(1, x)) * 32635, sign = v < 0 ? 0x80 : 0; if (sign) v = -v;
+    v += 132; let e = 7; for (let m = 0x4000; (v & m) === 0 && e > 0; m >>= 1) e--;
+    return ~(sign | (e << 4) | ((v >> (e + 3)) & 0x0f)) & 0xff;
+  }
+  const MU = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const u = ~i & 0xff, sign = u & 0x80, e = (u >> 4) & 7, m = u & 0x0f; const v = (((m << 3) + 132) << e) - 132; MU[i] = (sign ? -v : v) / 32768; }
+  const b64 = (u8) => { let s = ''; for (let i = 0; i < u8.length; i += 4096) s += String.fromCharCode.apply(null, u8.subarray(i, i + 4096)); return btoa(s); };
+  const unb64 = (str) => { const s = atob(str), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
+
+  function needFeed() {
+    if (amHost()) { for (const k of dataPairs) if (+k.split('>')[0] === me()) return true; return false; }
+    return feedOn;
+  }
+  function startFeed() {
+    if (cap || !live || !mic || !needFeed()) return;
+    const c = audioCtx(); if (!c) return;
+    try {
+      const src = c.createMediaStreamSource(mic);
+      const proc = c.createScriptProcessor(4096, 1, 1);
+      const ratio = Math.max(1, Math.round(c.sampleRate / DATA_RATE)), rate = c.sampleRate / ratio;
+      let seq = 0;
+      proc.onaudioprocess = (ev) => {
+        if (!live) return;
+        const x = ev.inputBuffer.getChannelData(0), n = Math.floor(x.length / ratio), out = new Uint8Array(n);
+        for (let i = 0; i < n; i++) { let a = 0; for (let j = 0; j < ratio; j++) a += x[i * ratio + j]; out[i] = mulawEnc(a / ratio); }
+        sendChunk({ r: rate, q: seq++, d: b64(out) });
+      };
+      const sink = c.createGain(); sink.gain.value = 0;   // keeps the processor running, makes no sound
+      src.connect(proc); proc.connect(sink); sink.connect(c.destination);
+      cap = { src, proc, sink }; dataStats.fed++;
+      if (pressed) setButton('live');
+    } catch (_) { cap = null; }
+  }
+  function stopFeed() {
+    if (!cap) return;
+    try { cap.proc.onaudioprocess = null; cap.src.disconnect(); cap.proc.disconnect(); cap.sink.disconnect(); } catch (_) {}
+    cap = null;
+  }
+  function sendChunk(chunk) {
+    dataStats.sent++;
+    try {
+      if (!amHost()) { Game.sendVoicePcm && Game.sendVoicePcm(chunk); return; }
+      for (const k of dataPairs) { const [t, l] = k.split('>').map(Number); if (t === me()) Game.sendVoicePcmTo(l, Object.assign({ seat: t }, chunk)); }
+    } catch (_) {}
+  }
+  // Listener: ask for a talker's voice over the game connection
+  function askData(seat) {
+    dataHear.add(seat);
+    if (dataAsked[seat] && Date.now() - dataAsked[seat] < 1500) return;
+    dataAsked[seat] = Date.now(); dataStats.asked++;
+    audioCtx();
+    try { if (amHost()) onDataWant(me(), seat); else Game.sendVoiceWant && Game.sendVoiceWant(seat); } catch (_) {}
+  }
+  // Host: listener L needs talker T's voice as chunks
+  function onDataWant(L, T) {
+    if (!amHost() || L === T || !Number.isInteger(L) || !Number.isInteger(T)) return;
+    dataPairs.add(T + '>' + L);
+    if (T === me()) startFeed();
+    else { try { Game.sendVoiceFeed && Game.sendVoiceFeed(T, true); } catch (_) {} }
+  }
+  // Talker (client): the host says someone needs our voice as chunks
+  function onFeed(on) { feedOn = !!on; if (feedOn) startFeed(); else stopFeed(); }
+  // Host: a chunk from talker T — play it if we need it, pass it on to others who do
+  function onPcmFromClient(T, chunk) {
+    if (!amHost() || !chunk || typeof chunk.d !== 'string') return;
+    if (dataHear.has(T)) playPcm(T, chunk);
+    for (const k of dataPairs) { const [t, l] = k.split('>').map(Number); if (t === T && l !== me()) { try { Game.sendVoicePcmTo(l, { seat: T, r: chunk.r, q: chunk.q, d: chunk.d }); } catch (_) {} } }
+  }
+  function onPcm(seat, chunk) {
+    if (!Number.isInteger(seat) || seat === me() || !dataHear.has(seat) || !chunk || typeof chunk.d !== 'string') return;
+    playPcm(seat, chunk);
+  }
+  function playPcm(seat, chunk) {
+    if (getPref() === 'off') return;
+    const c = audioCtx(); if (!c) return;
+    if (c.state !== 'running') { if (!tapWarned) { tapWarned = true; toast('Tap the screen to hear voice chat'); } return; }
+    let u; try { u = unb64(chunk.d); } catch (_) { return; }
+    if (u.length > 20000) return;
+    const r = +chunk.r > 3000 ? +chunk.r : DATA_RATE, up = c.sampleRate / r, n = Math.floor(u.length * up);
+    if (n < 2) return;
+    const buf = c.createBuffer(1, n, c.sampleRate), ch = buf.getChannelData(0);
+    let e = 0;
+    for (let i = 0; i < n; i++) { const p = i / up, k = Math.floor(p), f = p - k, a = MU[u[k]], b = k + 1 < u.length ? MU[u[k + 1]] : a; ch[i] = a + (b - a) * f; e += ch[i] * ch[i]; }
+    const P = play[seat] || (play[seat] = { next: 0, t: 0, rms: 0 });
+    const now = c.currentTime;
+    if (P.next < now + 0.02 || P.next > now + 0.9) P.next = now + 0.2;   // small cushion against uneven arrival
+    const src = c.createBufferSource(); src.buffer = buf; src.connect(outGain); src.start(P.next);
+    P.next += buf.duration; P.t = Date.now(); P.rms = Math.sqrt(e / n);
+    dataStats.recv++;
+    muteDirect(seat); const rl = inCalls.get('relay:' + seat); if (rl) rl.audio.muted = true;
+  }
+  const dataRecent = (seat) => dataHear.has(seat) && play[seat] && Date.now() - play[seat].t < 1500;
+  function pruneData() {
+    for (const k of Array.from(dataPairs)) {
+      const [t, l] = k.split('>').map(Number);
+      if (!amHost() || !peerOfSeat(t) && t !== me() || !peerOfSeat(l) && l !== me()) {
+        dataPairs.delete(k);
+        if (amHost() && t !== me() && peerOfSeat(t) && ![...dataPairs].some(x => +x.split('>')[0] === t)) { try { Game.sendVoiceFeed(t, false); } catch (_) {} }
+      }
+    }
+    if (amHost() && !needFeed()) stopFeed();
+    if (!st()) { dataHear.clear(); feedOn = false; stopFeed(); }
+  }
+
   // Browsers that refused to start audio without a tap get another go on the next tap
   ['pointerdown', 'touchend', 'click'].forEach(ev => window.addEventListener(ev, () => {
     for (const a of Array.from(pendingAudio)) { a.play().then(() => pendingAudio.delete(a)).catch(() => {}); }
+    if (actx && (actx.state === 'closed' || actxStuck)) {          // rebuild a sound engine the phone broke
+      try { if (actx.state !== 'closed') actx.close(); } catch (_) {}
+      actx = null; actxStuck = false; for (const k in play) play[k].next = 0; audioCtx();
+    } else if (actx && actx.state !== 'running') actx.resume().then(() => { tapWarned = false; }).catch(() => {});
   }, { passive: true, capture: true }));
+  // Back from another app: restart incoming voice and check the sound engine still ticks
+  let actxStuck = false;
+  function wake() {
+    if (document.hidden) return;
+    for (const e of inCalls.values()) {
+      const a = e.audio;
+      if (a && a.srcObject && a.paused) { const p = a.play(); if (p && p.catch) p.catch(() => pendingAudio.add(a)); }
+    }
+    if (actx) {
+      const c = actx, t0 = c.currentTime;
+      if (c.state !== 'running') c.resume().catch(() => {});
+      setTimeout(() => { if (actx === c && (c.state !== 'running' || c.currentTime === t0)) actxStuck = true; }, 600);
+    }
+  }
+  document.addEventListener('visibilitychange', wake);
+  window.addEventListener('pageshow', wake);
+  window.addEventListener('focus', wake);
 
   // Music and voice clips dip while someone talks
   function duck(on) { try { if (typeof Sound !== 'undefined' && Sound.duck) Sound.duck(on || talking.size > 0); } catch (_) {} }
@@ -318,13 +470,18 @@ const Voice = (() => {
     if (getPref() === 'off') return;
     setTimeout(async () => {
       if (!talking.has(seat)) return;
-      if (await packetsFrom(seat) > 0) return;
+      if (dataRecent(seat)) return;                       // arriving over the game connection
+      if (!dataHear.has(seat) && await packetsFrom(seat) > 0) return;
       // Nothing arriving: ask the talker to redial, and the host to pass their audio on.
       // Whichever path works first is used; the host path is kept for the rest of the game.
       try { if (Game.sendVoiceNudge) Game.sendVoiceNudge(seat); } catch (_) {}
       // Give the direct line a fair chance first (~2 s); a line still not connected by then won't
       if (tries >= 1 && !directUp(seat)) askRelay(seat);
-      if (tries < 3) watchIncoming(seat, tries + 1);
+      // Still nothing: send it over the game connection. Straight away when no relay is possible
+      // (only two phones, or the host is one end), otherwise once the relay had its chance too.
+      const canRelay = !amHost() && peerOfSeat(seat) !== hostPeer();
+      if (dataHear.has(seat) || (tries >= 1 && !canRelay && !directUp(seat)) || tries >= 2) askData(seat);
+      if (tries < 4) watchIncoming(seat, tries + 1);
     }, tries ? 1000 : 900);
   }
   // Talker side: a listener says our audio isn't reaching them — redial them
@@ -362,6 +519,7 @@ const Voice = (() => {
       if (gone) { try { e.call.close(); } catch (_) {} inCalls.delete(key); if (e.viaHost) relayed.delete(e.seat); }
     }
     pruneRelay();
+    pruneData();
   }
   function bindButton() {
     const b = document.getElementById('ptt-btn'); if (!b || b._bound) return;
@@ -397,14 +555,16 @@ const Voice = (() => {
 
   function setPref(v) {
     lsSet(LS_KEY, v === 'off' ? 'off' : 'on');
-    if (v === 'off') { stop(); releaseMic(); for (const e of inCalls.values()) { try { e.call.close(); } catch (_) {} } }
+    if (v === 'off') { stop(); releaseMic(); for (const e of inCalls.values()) { try { e.call.close(); } catch (_) {} } dataHear.clear(); }
     refresh();
   }
 
   return {
     getPref, setPref, setTalking, isTalking, refresh, onNudge, onRelayRequest,
+    onDataWant, onFeed, onPcm, onPcmFromClient,
     // test hooks
-    __debug: { nudges: () => nudges, relay: () => ({ ...relayStats, relayed: [...relayed], pairs: [...relayPairs], fwd: fwd.size, directDead: directDead.size }), outCalls: () => outCalls.size, inCalls: () => inCalls.size, micOpen: () => !!mic, live: () => live, blocked: () => blocked,
+    __debug: { nudges: () => nudges, data: () => ({ ...dataStats, hear: [...dataHear], pairs: [...dataPairs], feedOn, capturing: !!cap, ctx: actx && actx.state, rms: Object.fromEntries(Object.entries(play).map(([k, v]) => [k, Date.now() - v.t < 1500 ? +v.rms.toFixed(4) : 0])) }),
+      relay: () => ({ ...relayStats, relayed: [...relayed], pairs: [...relayPairs], fwd: fwd.size, directDead: directDead.size }), outCalls: () => outCalls.size, inCalls: () => inCalls.size, micOpen: () => !!mic, live: () => live, blocked: () => blocked,
       inAudios: () => Array.from(inCalls.values()).map(e => e.audio), start, stop,
       stats: async () => { const out = []; for (const [pid, c] of outCalls) { const r = await c.peerConnection.getStats(); r.forEach(x => { if (x.type === 'outbound-rtp') out.push({ dir: 'out', pid, bytes: x.bytesSent, pk: x.packetsSent }); if (x.type === 'transport') out.push({ pid, dtls: x.dtlsState, ice: x.iceState }); }); out.push({ pid, conn: c.peerConnection.connectionState, sig: c.peerConnection.signalingState }); }
         for (const [pid, e] of inCalls) { const r = await e.call.peerConnection.getStats(); r.forEach(x => { if (x.type === 'inbound-rtp') out.push({ dir: 'in', pid, bytes: x.bytesReceived, pk: x.packetsReceived }); }); }

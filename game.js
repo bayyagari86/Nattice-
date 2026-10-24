@@ -1329,6 +1329,16 @@ const Game = (() => {
         if (typeof Voice !== 'undefined' && Voice.onRelayRequest) Voice.onRelayRequest(peerToSeat.get(fromPeer), msg.talker);
         break;
       }
+      case 'VOICE_WANT': {      // a listener gets no audio line at all: send the talker's voice over the game connection
+        if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.talker)) return;
+        if (typeof Voice !== 'undefined' && Voice.onDataWant) Voice.onDataWant(peerToSeat.get(fromPeer), msg.talker);
+        break;
+      }
+      case 'VOICE_PCM': {       // a voice chunk from a talking client
+        if (!peerToSeat.has(fromPeer)) return;
+        if (typeof Voice !== 'undefined' && Voice.onPcmFromClient) Voice.onPcmFromClient(peerToSeat.get(fromPeer), msg);
+        break;
+      }
       case 'VOICE_NUDGE': {     // a listener isn't getting a talker's audio: pass it to the talker
         if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.to)) return;
         const from = peerToSeat.get(fromPeer);
@@ -1458,6 +1468,12 @@ const Game = (() => {
         break;
       case 'VOICE_NUDGE':
         if (Number.isInteger(msg.from) && typeof Voice !== 'undefined') Voice.onNudge(msg.from);
+        break;
+      case 'VOICE_PCM':          // voice chunk passed on by the host
+        if (fromPeer === getHostPeerId() && typeof Voice !== 'undefined' && Voice.onPcm) Voice.onPcm(msg.seat, msg);
+        break;
+      case 'VOICE_FEED':         // host: someone needs our voice over the game connection
+        if (fromPeer === getHostPeerId() && typeof Voice !== 'undefined' && Voice.onFeed) Voice.onFeed(!!msg.on);
         break;
       case 'EMOJI_REACTION':
         UI.showEmojiReaction(msg.emoji, Number.isInteger(msg.seat) ? msg.seat : undefined);
@@ -3329,6 +3345,24 @@ const Game = (() => {
     return send(h, { type: 'VOICE_RELAY', talker: talkerSeat });
   }
 
+  // Voice over the game connection (when no audio line can be opened)
+  function sendVoiceWant(talkerSeat) {
+    if (isSoloMode || !state || Network.getIsHost() || !Number.isInteger(talkerSeat)) return false;
+    const h = getHostPeerId(); return h ? send(h, { type: 'VOICE_WANT', talker: talkerSeat }) : false;
+  }
+  function sendVoicePcm(chunk) {
+    if (isSoloMode || !state || Network.getIsHost()) return false;
+    const h = getHostPeerId(); return h ? send(h, { type: 'VOICE_PCM', r: chunk.r, q: chunk.q, d: chunk.d }) : false;
+  }
+  function sendVoicePcmTo(seat, chunk) {
+    if (!Network.getIsHost()) return false;
+    const pid = seatToPeer.get(seat); return pid ? send(pid, { type: 'VOICE_PCM', seat: chunk.seat, r: chunk.r, q: chunk.q, d: chunk.d }) : false;
+  }
+  function sendVoiceFeed(seat, on) {
+    if (!Network.getIsHost()) return false;
+    const pid = seatToPeer.get(seat); return pid ? send(pid, { type: 'VOICE_FEED', on: !!on }) : false;
+  }
+
   // Broadcast emoji reaction to all players
   function broadcastEmoji(emoji) {
     if (!isSoloMode) {
@@ -3506,7 +3540,7 @@ const Game = (() => {
     hostGame, joinGame, startGame, startSoloGame, leaveGame, cleanup,
     getState, getMySeat, getMyTeam, hostNow,
     makeBid, selectTrump, playCard,
-    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji, sendVoiceState, sendVoiceNudge, sendVoiceRelay, getHostPeerId,
+    raiseBid, noRaise, commitRaiseTricks, extendRaiseTimer, sendChat, broadcastEmoji, sendVoiceState, sendVoiceNudge, sendVoiceRelay, getHostPeerId, sendVoiceWant, sendVoicePcm, sendVoicePcmTo, sendVoiceFeed,
     stopAINameRotation, applyBotNames,
     kickPlayer,
     getSavedSession, resumeSavedSession, clearSession,

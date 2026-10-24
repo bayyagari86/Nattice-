@@ -30,10 +30,40 @@ const Sound = (() => {
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = 0.9;
+    master.gain.value = ducked ? 0.25 : 0.9;
     master.connect(ctx.destination);
+    const mine = ctx;
+    ctx.onstatechange = () => { if (mine.state === 'running') everRan = true; if (ctx === mine && (mine.state === 'interrupted' || mine.state === 'closed')) needRebuild = true; };
     return ctx;
   }
+  // Coming back from another app: phones (iPhone especially) can leave the sound
+  // engine suspended, "interrupted", or reporting running while its clock is frozen.
+  // Wake it on return; if it's still stuck, build a fresh one on the next tap.
+  let needRebuild = false, ducked = false, everRan = false;
+  function rebuild() {
+    const old = ctx;
+    ctx = null; master = null; recDest = null; needRebuild = false;
+    ensureCtx();
+    try { if (old && old.state !== 'closed') old.close(); } catch (_) {}
+  }
+  function checkAlive() {
+    const c = ctx; if (!c || !everRan) return;      // never unlocked yet: nothing to recover
+    if (c.state !== 'running') c.resume().catch(() => {});
+    const t0 = c.currentTime;
+    setTimeout(() => {
+      if (ctx !== c || document.hidden) return;
+      if (c.state === 'running' && c.currentTime !== t0) return;
+      rebuild();                                   // Android/desktop allow this straight away
+      const n = ctx;
+      setTimeout(() => { if (ctx === n && n && n.state !== 'running') needRebuild = true; }, 300); // iPhone: next tap
+    }, 600);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { mediaKicked = false; return; }
+    checkAlive();
+  });
+  window.addEventListener('pageshow', (e) => { mediaKicked = false; checkAlive(); });
+  window.addEventListener('focus', () => checkAlive());
   // iPhone: Web Audio is muted by the ring/silent switch unless the page asks
   // for "playback" (iOS 16.4+). Older iOS: playing a media element once does the same.
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (_) {}
@@ -41,6 +71,7 @@ const Sound = (() => {
   let mediaKicked = false;
   // Browsers only allow sound after a user gesture (iOS: touchend / click)
   function unlock() {
+    if (needRebuild || (ctx && ctx.state === 'closed')) rebuild();
     const c = ensureCtx();
     if (!c) return;
     if (c.state !== 'running') c.resume().catch(() => {});
@@ -57,6 +88,7 @@ const Sound = (() => {
 
   // Dip game sounds while someone is talking on voice chat
   function duck(on) {
+    ducked = !!on;
     if (!master || !ctx) return;
     const v = on ? 0.25 : 0.9;
     try { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setTargetAtTime(v, ctx.currentTime, 0.08); } catch (_) { master.gain.value = v; }
@@ -208,6 +240,16 @@ const Sound = (() => {
   // ---------- Table host ----------
   let hostBusyUntil = 0;
   const hostQueue = [];
+  // Some announcements have several recorded versions; pick one at random (never the same twice running)
+  const HOST_VARIANTS = { or: { last_trick: ['last_trick', 'last_trick_2', 'last_trick_3'] } };
+  const lastVariant = {};
+  function pickVariant(lang, event) {
+    const list = HOST_VARIANTS[lang] && HOST_VARIANTS[lang][event];
+    if (!list || list.length < 2) return event;
+    const key = lang + event, choices = list.filter(v => v !== lastVariant[key]);
+    const v = choices[Math.floor(Math.random() * choices.length)];
+    lastVariant[key] = v; return v;
+  }
   function host(event, { music = true } = {}) {
     const lang = getHost();
     if (lang === 'off') return;
@@ -220,7 +262,7 @@ const Sound = (() => {
       if (event.startsWith('joker')) STINGS.joker(start); else STINGS.host(start);
     }
     hostBusyUntil = start + 1.6;
-    playUrl(hostFile(lang, event), { delay: start - now + (event.startsWith('joker') ? 0.35 : 0.18), gain: 1 })
+    playUrl(hostFile(lang, pickVariant(lang, event)), { delay: start - now + (event.startsWith('joker') ? 0.35 : 0.18), gain: 1 })
       .then(d => { if (d) hostBusyUntil = Math.max(hostBusyUntil, start + 0.3 + d); });
   }
 
@@ -265,6 +307,7 @@ const Sound = (() => {
     getSfx, getHost, getTalk,
     setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), getHostVoice, setHostVoice: v => lsSet(LS_HOSTV, v === 'm' ? 'm' : 'f'), setTalk: v => lsSet(LS_TALK, v),
     reaction, voiceFor, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
+    __ctx: () => ctx, __pickVariant: pickVariant,
     reelSting, reelVoice, reelBed,
     _ctx: () => ctx,
   };
