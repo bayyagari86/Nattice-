@@ -1331,7 +1331,7 @@ const Game = (() => {
       }
       case 'VOICE_WANT': {      // a listener gets no audio line at all: send the talker's voice over the game connection
         if (!peerToSeat.has(fromPeer) || !Number.isInteger(msg.talker)) return;
-        if (typeof Voice !== 'undefined' && Voice.onDataWant) Voice.onDataWant(peerToSeat.get(fromPeer), msg.talker);
+        if (typeof Voice !== 'undefined' && Voice.onDataWant) Voice.onDataWant(peerToSeat.get(fromPeer), msg.talker, msg.on !== false);
         break;
       }
       case 'VOICE_PCM': {       // a voice chunk from a talking client
@@ -3346,9 +3346,9 @@ const Game = (() => {
   }
 
   // Voice over the game connection (when no audio line can be opened)
-  function sendVoiceWant(talkerSeat) {
+  function sendVoiceWant(talkerSeat, on = true) {
     if (isSoloMode || !state || Network.getIsHost() || !Number.isInteger(talkerSeat)) return false;
-    const h = getHostPeerId(); return h ? send(h, { type: 'VOICE_WANT', talker: talkerSeat }) : false;
+    const h = getHostPeerId(); return h ? send(h, { type: 'VOICE_WANT', talker: talkerSeat, on: !!on }) : false;
   }
   function sendVoicePcm(chunk) {
     if (isSoloMode || !state || Network.getIsHost()) return false;

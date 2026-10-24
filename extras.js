@@ -357,6 +357,8 @@ const Extras = (() => {
         Sound.getSfx(), Sound.setSfx, v => { if (v !== 'off') Sound.sting('celebrate'); });
       seg('host-options', [['or', 'ଓଡ଼ିଆ', 'Odia host'], ['en', 'English', 'English host'], ['off', 'Off', 'No host']],
         Sound.getHost(), Sound.setHost, v => { if (v !== 'off') Sound.host('trump_hearts'); });
+      seg('voiceset-options', [['orig', 'Original', 'First voices'], ['new', 'New excited', 'Male & female']], Sound.getVoiceSet(), Sound.setVoiceSet,
+        () => { if (Sound.getHost() !== 'off') Sound.host('joker_big'); });
       seg('host-voice-options', [['f', 'Female', 'Kore'], ['m', 'Male', 'Sadachbia']], Sound.getHostVoice(), Sound.setHostVoice,
         () => { if (Sound.getHost() !== 'off') Sound.host('joker_big'); });
       seg('saver-options', [['auto', 'Auto', 'Low battery'], ['on', 'On', 'Coolest'], ['off', 'Off', 'All effects']], getSaverPref(),

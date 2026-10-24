@@ -17,7 +17,12 @@ const Sound = (() => {
   const getSfx = () => { const v = lsGet(LS_SFX, 'voice'); return ['voice', 'music', 'off'].includes(v) ? v : 'voice'; };
   const LS_HOSTV = 'nattis.hostVoice'; // 'f' (Kore) | 'm' (Sadachbia)
   const getHostVoice = () => (lsGet(LS_HOSTV, 'f') === 'm' ? 'm' : 'f');
-  const hostFile = (lang, event) => `${BASE}${getHostVoice() === 'm' ? 'hostm' : 'host'}_${lang}_${event}.mp3`;
+  // Voice set: 'orig' = the first recorded voices (default), 'new' = excited male/female seat voices
+  const LS_VSET = 'nattis.voiceSet';
+  const getVoiceSet = () => (lsGet(LS_VSET, 'orig') === 'new' ? 'new' : 'orig');
+  const hostFile = (lang, event) => getVoiceSet() === 'orig'
+    ? `${BASE}host_${lang}_${event}.mp3`
+    : `${BASE}${getHostVoice() === 'm' ? 'hostm' : 'hostk'}_${lang}_${event}.mp3`;
   const getHost = () => { const v = lsGet(LS_HOST, 'or'); return ['or', 'en', 'off'].includes(v) ? v : 'or'; };
   const getTalk = () => lsGet(LS_TALK, 'on') === 'off' ? 'off' : 'on';
 
@@ -117,7 +122,9 @@ const Sound = (() => {
     try { await Promise.race([c.resume(), new Promise(r => setTimeout(r, ms))]); } catch (_) {}
     return c.state === 'running';
   }
+  const played = [];   // last few clips (for tests)
   async function playUrl(url, { delay = 0, gain = 1 } = {}) {
+    played.push(url.split('/').pop()); if (played.length > 20) played.shift();
     if (!(await waitRunning())) return 0;
     const buf = await load(url);
     if (!buf) return 0;
@@ -232,6 +239,7 @@ const Sound = (() => {
     sting(special || entry.mood || 'celebrate');
     if (getSfx() === 'voice' && entry.id) {
       const opts = { delay: special ? 0.55 : 0.18, gain: 1 };
+      if (getVoiceSet() === 'orig') { playUrl(`${BASE}${entry.id}.mp3`, opts); return; }
       playUrl(`${BASE}${entry.id}_${voiceFor(seat, info)}.mp3`, opts)
         .then(d => { if (!d && canPlay()) playUrl(`${BASE}${entry.id}.mp3`, opts); });
     }
@@ -245,7 +253,7 @@ const Sound = (() => {
   const lastVariant = {};
   function pickVariant(lang, event) {
     const list = HOST_VARIANTS[lang] && HOST_VARIANTS[lang][event];
-    if (!list || list.length < 2) return event;
+    if (!list || list.length < 2 || getVoiceSet() === 'orig') return event;
     const key = lang + event, choices = list.filter(v => v !== lastVariant[key]);
     const v = choices[Math.floor(Math.random() * choices.length)];
     lastVariant[key] = v; return v;
@@ -304,10 +312,10 @@ const Sound = (() => {
   function preload(ids) { if (!ensureCtx()) return; ids.forEach(id => load(`${BASE}${id}.mp3`)); }
 
   return {
-    getSfx, getHost, getTalk,
+    getSfx, getHost, getTalk, getVoiceSet, setVoiceSet: v => lsSet(LS_VSET, v === 'new' ? 'new' : 'orig'),
     setSfx: v => lsSet(LS_SFX, v), setHost: v => lsSet(LS_HOST, v), getHostVoice, setHostVoice: v => lsSet(LS_HOSTV, v === 'm' ? 'm' : 'f'), setTalk: v => lsSet(LS_TALK, v),
     reaction, voiceFor, host, sting, playUrl, unlock, canPlay, duck, startCapture, stopCapture, preload,
-    __ctx: () => ctx, __pickVariant: pickVariant,
+    __ctx: () => ctx, __pickVariant: pickVariant, __played: () => played.slice(),
     reelSting, reelVoice, reelBed,
     _ctx: () => ctx,
   };

@@ -106,6 +106,7 @@ const Voice = (() => {
   function dial(peerId, stream, tries) {
     const c = Network.callPeer(peerId, stream, { v: 1 });
     if (!c) return;
+    c._born = Date.now();
     outCalls.set(peerId, c);
     const drop = () => { if (outCalls.get(peerId) === c) outCalls.delete(peerId); };
     c.on('close', drop);
@@ -354,9 +355,23 @@ const Voice = (() => {
     audioCtx();
     try { if (amHost()) onDataWant(me(), seat); else Game.sendVoiceWant && Game.sendVoiceWant(seat); } catch (_) {}
   }
-  // Host: listener L needs talker T's voice as chunks
-  function onDataWant(L, T) {
+  // Listener: the direct line works again, stop the backup for this talker
+  function dropData(seat) {
+    dataHear.delete(seat); delete dataAsked[seat];
+    const pid = peerOfSeat(seat), d = pid && inCalls.get(pid);
+    if (d) d.audio.muted = getPref() === 'off';
+    try { if (amHost()) onDataWant(me(), seat, false); else Game.sendVoiceWant && Game.sendVoiceWant(seat, false); } catch (_) {}
+  }
+  // Host: listener L needs (or no longer needs) talker T's voice as chunks
+  function onDataWant(L, T, on = true) {
     if (!amHost() || L === T || !Number.isInteger(L) || !Number.isInteger(T)) return;
+    if (!on) {
+      dataPairs.delete(T + '>' + L);
+      if (![...dataPairs].some(x => +x.split('>')[0] === T)) {
+        if (T === me()) stopFeed(); else { try { Game.sendVoiceFeed && Game.sendVoiceFeed(T, false); } catch (_) {} }
+      }
+      return;
+    }
     dataPairs.add(T + '>' + L);
     if (T === me()) startFeed();
     else { try { Game.sendVoiceFeed && Game.sendVoiceFeed(T, true); } catch (_) {} }
@@ -441,7 +456,7 @@ const Voice = (() => {
     if (on) {
       talking.add(seat);
       talkTimers[seat] = setTimeout(() => setTalking(seat, false), MAX_TALK_MS + 3000); // safety net
-      if (seat !== me()) watchIncoming(seat, 0);
+      if (seat !== me()) watchIncoming(seat);
       if (amHost()) forwardAllFrom(seat);
     } else talking.delete(seat);
     const el = document.querySelector(`#player-positions .table-player[data-seat="${seat}"]`);
@@ -466,23 +481,38 @@ const Voice = (() => {
     const pid = peerOfSeat(seat);
     return Math.max(await packetsOn(pid && inCalls.get(pid)), await packetsOn(inCalls.get('relay:' + seat)));
   }
-  function watchIncoming(seat, tries) {
+  // While someone is shown talking, keep checking that their audio is actually flowing to us
+  // (packet count rising). If it stalls — line never came up, or dropped mid-talk — ask the talker
+  // to redial, then the host to relay it, then fall back to the game connection.
+  const watch = {};               // talker seat -> { token, prev, stall }
+  function watchIncoming(seat) {
     if (getPref() === 'off') return;
-    setTimeout(async () => {
-      if (!talking.has(seat)) return;
-      if (dataRecent(seat)) return;                       // arriving over the game connection
-      if (!dataHear.has(seat) && await packetsFrom(seat) > 0) return;
-      // Nothing arriving: ask the talker to redial, and the host to pass their audio on.
-      // Whichever path works first is used; the host path is kept for the rest of the game.
-      try { if (Game.sendVoiceNudge) Game.sendVoiceNudge(seat); } catch (_) {}
-      // Give the direct line a fair chance first (~2 s); a line still not connected by then won't
-      if (tries >= 1 && !directUp(seat)) askRelay(seat);
-      // Still nothing: send it over the game connection. Straight away when no relay is possible
-      // (only two phones, or the host is one end), otherwise once the relay had its chance too.
-      const canRelay = !amHost() && peerOfSeat(seat) !== hostPeer();
-      if (dataHear.has(seat) || (tries >= 1 && !canRelay && !directUp(seat)) || tries >= 2) askData(seat);
-      if (tries < 4) watchIncoming(seat, tries + 1);
-    }, tries ? 1000 : 900);
+    const w = watch[seat] = { token: {}, prev: 0, stall: 0, prevD: 0, good: 0 };
+    const tok = w.token;
+    const tick = async () => {
+      if (watch[seat] !== w || w.token !== tok || !talking.has(seat)) return;
+      const n = await packetsFrom(seat);
+      // On the backup path but the direct line is flowing again: go back to it (better sound)
+      if (dataHear.has(seat)) {
+        const pid = peerOfSeat(seat), nD = await packetsOn(pid && inCalls.get(pid));
+        w.good = directUp(seat) && nD > w.prevD ? w.good + 1 : 0; w.prevD = Math.max(w.prevD, nD);
+        if (w.good >= 2) dropData(seat);
+      }
+      const flowing = dataRecent(seat) || (!dataHear.has(seat) && n > w.prev);
+      w.prev = Math.max(w.prev, n);
+      if (flowing) w.stall = 0;
+      else {
+        w.stall++;
+        try { if (Game.sendVoiceNudge) Game.sendVoiceNudge(seat); } catch (_) {}
+        if (w.stall >= 2 && !directUp(seat)) askRelay(seat);
+        // Straight to the game connection when no relay is possible (2 phones, or the host is one
+        // end); otherwise once the relay has had its chance too.
+        const canRelay = !amHost() && peerOfSeat(seat) !== hostPeer();
+        if (dataHear.has(seat) || (w.stall >= 2 && !canRelay && !directUp(seat)) || w.stall >= 3) askData(seat);
+      }
+      setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 900);
   }
   // Talker side: a listener says our audio isn't reaching them — redial them
   let nudges = 0;
@@ -493,6 +523,13 @@ const Voice = (() => {
     if (!pid || !targets().some(t => t.peerId === pid)) return;
     const c = outCalls.get(pid);
     if (c && c._nudgedAt && Date.now() - c._nudgedAt < 1000) return;
+    // Leave a line alone while it's still being set up (busy tables and mobile data can take a few
+    // seconds), and while it's up and sending: tearing it down only restarts the wait.
+    // A line that never comes up is redialled by dial() itself, and the listener falls back.
+    if (c && !c._failed && !c._pending) {
+      const age = Date.now() - (c._born || 0);
+      if (age < 2000 || (isUp(c) && age < 15000)) return;
+    }
     if (c) { try { c.close(); } catch (_) {} outCalls.delete(pid); }
     dial(pid, mic, 1);
     const nc = outCalls.get(pid); if (nc) nc._nudgedAt = Date.now();
